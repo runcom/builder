@@ -1,9 +1,9 @@
 package integration
 
 import (
+	"fmt"
 	"os"
 
-	"fmt"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -82,5 +82,12 @@ var _ = Describe("Podman run dns", func() {
 		session.WaitWithDefaultTimeout()
 		Expect(session.ExitCode()).To(Equal(0))
 		Expect(session.OutputToString()).To(Equal("foobar"))
+	})
+
+	It("podman run add hostname sets /etc/hosts", func() {
+		session := podmanTest.Podman([]string{"run", "-t", "-i", "--hostname=foobar", ALPINE, "cat", "/etc/hosts"})
+		session.WaitWithDefaultTimeout()
+		Expect(session.ExitCode()).To(Equal(0))
+		Expect(session.LineInOutputContains("foobar")).To(BeTrue())
 	})
 })

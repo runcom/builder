@@ -24,6 +24,12 @@ var (
 			Usage: "path of the authentication file. Default is ${XDG_RUNTIME_DIR}/containers/auth.json",
 		},
 		cli.StringFlag{
+			Name:   "blob-cache",
+			Value:  "",
+			Usage:  "assume image blobs in the specified directory will be available for pushing",
+			Hidden: true, // this is here mainly so that we can test the API during integration tests
+		},
+		cli.StringFlag{
 			Name:  "cert-dir",
 			Value: "",
 			Usage: "use certificates at the specified path to access the registry",
@@ -157,6 +163,11 @@ func commitCmd(c *cli.Context) error {
 		dest = dest2
 	}
 
+	var blobDirectories []string
+	if blobCache := c.String("blob-cache"); blobCache != "" {
+		blobDirectories = []string{blobCache}
+	}
+
 	options := buildah.CommitOptions{
 		PreferredManifestType: format,
 		Compression:           compress,
@@ -165,6 +176,7 @@ func commitCmd(c *cli.Context) error {
 		SystemContext:         systemContext,
 		IIDFile:               c.String("iidfile"),
 		Squash:                c.Bool("squash"),
+		BlobDirectories:       blobDirectories,
 	}
 	if !c.Bool("quiet") {
 		options.ReportWriter = os.Stderr
@@ -173,10 +185,14 @@ func commitCmd(c *cli.Context) error {
 	if err != nil {
 		return util.GetFailureCause(err, errors.Wrapf(err, "error committing container %q to %q", builder.Container, image))
 	}
-	if ref != nil {
+	if ref != nil && id != "" {
 		logrus.Debugf("wrote image %s with ID %s", ref, id)
-	} else {
+	} else if ref != nil {
+		logrus.Debugf("wrote image %s", ref)
+	} else if id != "" {
 		logrus.Debugf("wrote image with ID %s", id)
+	} else {
+		logrus.Debugf("wrote image")
 	}
 	if options.IIDFile == "" && id != "" {
 		fmt.Printf("%s\n", id)

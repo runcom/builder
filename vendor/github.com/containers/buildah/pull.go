@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/containers/buildah/pkg/blobcache"
 	"github.com/containers/buildah/util"
 	cp "github.com/containers/image/copy"
 	"github.com/containers/image/docker/reference"
@@ -40,6 +41,10 @@ type PullOptions struct {
 	// image name alone can not be resolved to a reference to a source
 	// image.  No separator is implicitly added.
 	Transport string
+	// BlobDirectory is the name of a directory in which we'll attempt to
+	// store copies of layer blobs that we pull down, if any.  It should
+	// already exist.
+	BlobDirectory string
 }
 
 func localImageNameForReference(ctx context.Context, store storage.Store, srcRef types.ImageReference, spec string) (string, error) {
@@ -182,6 +187,14 @@ func pullImage(ctx context.Context, store storage.Store, imageName string, optio
 	if err != nil {
 		return nil, errors.Wrapf(err, "error parsing image name %q", destName)
 	}
+	var maybeCachedRef types.ImageReference = destRef
+	if options.BlobDirectory != "" {
+		cachedRef, err := blobcache.NewBlobCache(destRef, []string{options.BlobDirectory})
+		if err != nil {
+			return nil, errors.Wrapf(err, "error wrapping image reference %q in blob cache at %q", transports.ImageName(destRef), options.BlobDirectory)
+		}
+		maybeCachedRef = cachedRef
+	}
 
 	policy, err := signature.DefaultPolicy(sc)
 	if err != nil {
@@ -200,7 +213,7 @@ func pullImage(ctx context.Context, store storage.Store, imageName string, optio
 	}()
 
 	logrus.Debugf("copying %q to %q", spec, destName)
-	if _, err := cp.Image(ctx, policyContext, destRef, srcRef, getCopyOptions(options.ReportWriter, srcRef, sc, destRef, nil, "")); err != nil {
+	if _, err := cp.Image(ctx, policyContext, maybeCachedRef, srcRef, getCopyOptions(options.ReportWriter, srcRef, sc, maybeCachedRef, nil, "")); err != nil {
 		logrus.Debugf("error copying src image [%q] to dest image [%q] err: %v", spec, destName, err)
 		return nil, err
 	}

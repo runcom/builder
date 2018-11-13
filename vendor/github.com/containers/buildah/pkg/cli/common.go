@@ -85,6 +85,12 @@ var (
 			Name:  "authfile",
 			Usage: "path of the authentication file. Default is ${XDG_RUNTIME_DIR}/containers/auth.json",
 		},
+		cli.StringFlag{
+			Name:   "blob-cache",
+			Value:  "",
+			Usage:  "assume image blobs in the specified directory will be available for pushing",
+			Hidden: true, // this is here mainly so that we can test the API during integration tests
+		},
 		cli.StringSliceFlag{
 			Name:  "build-arg",
 			Usage: "`argument=value` to supply to the builder",

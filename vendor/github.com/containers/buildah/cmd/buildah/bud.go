@@ -192,6 +192,11 @@ func budCmd(c *cli.Context) error {
 	}
 	namespaceOptions.AddOrReplace(usernsOption...)
 
+	var blobDirectories []string
+	if blobCache := c.String("blob-cache"); blobCache != "" {
+		blobDirectories = []string{blobCache}
+	}
+
 	options := imagebuildah.BuildOptions{
 		ContextDirectory:        contextDir,
 		PullPolicy:              pullPolicy,
@@ -227,6 +232,7 @@ func budCmd(c *cli.Context) error {
 		NoCache:                 c.Bool("no-cache"),
 		RemoveIntermediateCtrs:  c.BoolT("rm"),
 		ForceRmIntermediateCtrs: c.Bool("force-rm"),
+		BlobDirectories:         blobDirectories,
 	}
 
 	if c.Bool("quiet") {

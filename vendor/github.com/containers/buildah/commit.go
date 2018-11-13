@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"time"
 
+	"github.com/containers/buildah/pkg/blobcache"
 	"github.com/containers/buildah/util"
 	cp "github.com/containers/image/copy"
 	"github.com/containers/image/docker/reference"
@@ -55,6 +56,14 @@ type CommitOptions struct {
 	// Squash tells the builder to produce an image with a single layer
 	// instead of with possibly more than one layer.
 	Squash bool
+	// BlobDirectories is a slice of names of directories in which we'll
+	// look for prebuilt copies of layer blobs that we might otherwise need
+	// to regenerate from on-disk layers.  If blobs are available, the
+	// manifest of the new image will reference the blobs rather than
+	// on-disk layers.  Any attempt to copy (push) the image to another
+	// location will also need to be able to search these directories for
+	// parts of the image.
+	BlobDirectories []string
 
 	// OnBuild is a list of commands to be run by images based on this image
 	OnBuild []string
@@ -85,6 +94,10 @@ type PushOptions struct {
 	// ManifestType is the format to use when saving the imge using the 'dir' transport
 	// possible options are oci, v2s1, and v2s2
 	ManifestType string
+	// BlobDirectories is a slice of names of directories in which we'll
+	// look for prebuilt copies of layer blobs that we might otherwise need
+	// to regenerate from on-disk layers.
+	BlobDirectories []string
 }
 
 // Commit writes the contents of the container, along with its updated
@@ -128,7 +141,7 @@ func (b *Builder) Commit(ctx context.Context, dest types.ImageReference, options
 			}
 		}
 	}
-	src, err := b.makeImageRef(options.PreferredManifestType, options.Parent, exportBaseLayers, options.Squash, options.Compression, options.HistoryTimestamp)
+	src, err := b.makeImageRef(options.PreferredManifestType, options.Parent, exportBaseLayers, options.Squash, options.BlobDirectories, options.Compression, options.HistoryTimestamp)
 	if err != nil {
 		return imgID, nil, "", errors.Wrapf(err, "error computing layer digests and building metadata for container %q", b.ContainerID)
 	}
@@ -209,10 +222,18 @@ func Push(ctx context.Context, image string, dest types.ImageReference, options 
 	if err != nil {
 		return nil, "", err
 	}
+	var maybeCachedSrc types.ImageReference = src
+	if len(options.BlobDirectories) > 0 && options.BlobDirectories[0] != "" {
+		cache, err := blobcache.NewBlobCache(src, options.BlobDirectories)
+		if err != nil {
+			return nil, "", err
+		}
+		maybeCachedSrc = cache
+	}
 	// Copy everything.
 	var manifestBytes []byte
-	if manifestBytes, err = cp.Image(ctx, policyContext, dest, src, getCopyOptions(options.ReportWriter, src, nil, dest, systemContext, options.ManifestType)); err != nil {
-		return nil, "", errors.Wrapf(err, "error copying layers and metadata from %q to %q", transports.ImageName(src), transports.ImageName(dest))
+	if manifestBytes, err = cp.Image(ctx, policyContext, dest, maybeCachedSrc, getCopyOptions(options.ReportWriter, maybeCachedSrc, nil, dest, systemContext, options.ManifestType)); err != nil {
+		return nil, "", errors.Wrapf(err, "error copying layers and metadata from %q to %q", transports.ImageName(maybeCachedSrc), transports.ImageName(dest))
 	}
 	if options.ReportWriter != nil {
 		fmt.Fprintf(options.ReportWriter, "")

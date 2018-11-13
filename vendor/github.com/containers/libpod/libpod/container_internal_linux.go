@@ -19,12 +19,10 @@ import (
 	cnitypes "github.com/containernetworking/cni/pkg/types/current"
 	"github.com/containernetworking/plugins/pkg/ns"
 	crioAnnotations "github.com/containers/libpod/pkg/annotations"
-	"github.com/containers/libpod/pkg/chrootuser"
 	"github.com/containers/libpod/pkg/criu"
+	"github.com/containers/libpod/pkg/lookup"
 	"github.com/containers/libpod/pkg/rootless"
 	"github.com/containers/storage/pkg/idtools"
-	"github.com/cyphar/filepath-securejoin"
-	"github.com/opencontainers/runc/libcontainer/user"
 	spec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/opencontainers/runtime-tools/generate"
 	"github.com/opencontainers/selinux/go-selinux/label"
@@ -59,7 +57,7 @@ func (c *Container) prepare() (err error) {
 		networkStatus                   []*cnitypes.Result
 		createNetNSErr, mountStorageErr error
 		mountPoint                      string
-		saveNetworkStatus               bool
+		tmpStateLock                    sync.Mutex
 	)
 
 	wg.Add(2)
@@ -68,17 +66,55 @@ func (c *Container) prepare() (err error) {
 		defer wg.Done()
 		// Set up network namespace if not already set up
 		if c.config.CreateNetNS && c.state.NetNS == nil && !c.config.PostConfigureNetNS {
-			saveNetworkStatus = true
 			netNS, networkStatus, createNetNSErr = c.runtime.createNetNS(c)
+
+			tmpStateLock.Lock()
+			defer tmpStateLock.Unlock()
+
+			// Assign NetNS attributes to container
+			if createNetNSErr == nil {
+				c.state.NetNS = netNS
+				c.state.NetworkStatus = networkStatus
+			}
 		}
 	}()
 	// Mount storage if not mounted
 	go func() {
 		defer wg.Done()
 		mountPoint, mountStorageErr = c.mountStorage()
+
+		if mountStorageErr != nil {
+			return
+		}
+
+		tmpStateLock.Lock()
+		defer tmpStateLock.Unlock()
+
+		// Finish up mountStorage
+		c.state.Mounted = true
+		c.state.Mountpoint = mountPoint
+		if c.state.UserNSRoot == "" {
+			c.state.RealMountpoint = c.state.Mountpoint
+		} else {
+			c.state.RealMountpoint = filepath.Join(c.state.UserNSRoot, "mountpoint")
+		}
+
+		logrus.Debugf("Created root filesystem for container %s at %s", c.ID(), c.state.Mountpoint)
+	}()
+
+	defer func() {
+		if err != nil {
+			if err2 := c.cleanupNetwork(); err2 != nil {
+				logrus.Errorf("Error cleaning up container %s network: %v", c.ID(), err2)
+			}
+			if err2 := c.cleanupStorage(); err2 != nil {
+				logrus.Errorf("Error cleaning up container %s storage: %v", c.ID(), err2)
+			}
+		}
 	}()
 
 	wg.Wait()
+
 	if createNetNSErr != nil {
 		if mountStorageErr != nil {
 			logrus.Error(createNetNSErr)
@@ -90,22 +126,6 @@ func (c *Container) prepare() (err error) {
 		return mountStorageErr
 	}
 
-	// Assign NetNS attributes to container
-	if saveNetworkStatus {
-		c.state.NetNS = netNS
-		c.state.NetworkStatus = networkStatus
-	}
-
-	// Finish up mountStorage
-	c.state.Mounted = true
-	c.state.Mountpoint = mountPoint
-	if c.state.UserNSRoot == "" {
-		c.state.RealMountpoint = c.state.Mountpoint
-	} else {
-		c.state.RealMountpoint = filepath.Join(c.state.UserNSRoot, "mountpoint")
-	}
-
-	logrus.Debugf("Created root filesystem for container %s at %s", c.ID(), c.state.Mountpoint)
 	// Save the container
 	return c.save()
 }
@@ -135,6 +155,10 @@ func (c *Container) cleanupNetwork() error {
 // Generate spec for a container
 // Accepts a map of the container's dependencies
 func (c *Container) generateSpec(ctx context.Context) (*spec.Spec, error) {
+	execUser, err := lookup.GetUserGroupInfo(c.state.Mountpoint, c.config.User, nil)
+	if err != nil {
+		return nil, err
+	}
 	g := generate.NewFromSpec(c.config.Spec)
 
 	// If network namespace was requested, add it now
@@ -188,7 +212,6 @@ func (c *Container) generateSpec(ctx context.Context) (*spec.Spec, error) {
 		}
 	}
 
-	var err error
 	if !rootless.IsRootless() {
 		if c.state.ExtensionStageHooks, err = c.setupOCIHooks(ctx, g.Config); err != nil {
 			return nil, errors.Wrapf(err, "error setting up OCI Hooks")
@@ -206,13 +229,9 @@ func (c *Container) generateSpec(ctx context.Context) (*spec.Spec, error) {
 		if !c.state.Mounted {
 			return nil, errors.Wrapf(ErrCtrStateInvalid, "container %s must be mounted in order to translate User field", c.ID())
 		}
-		uid, gid, err := chrootuser.GetUser(c.state.Mountpoint, c.config.User)
-		if err != nil {
-			return nil, err
-		}
 		// User and Group must go together
-		g.SetProcessUID(uid)
-		g.SetProcessGID(gid)
+		g.SetProcessUID(uint32(execUser.Uid))
+		g.SetProcessGID(uint32(execUser.Gid))
 	}
 
 	// Add addition groups if c.config.GroupAdd is not empty
@@ -220,11 +239,8 @@ func (c *Container) generateSpec(ctx context.Context) (*spec.Spec, error) {
 		if !c.state.Mounted {
 			return nil, errors.Wrapf(ErrCtrStateInvalid, "container %s must be mounted in order to add additional groups", c.ID())
 		}
-		for _, group := range c.config.Groups {
-			gid, err := chrootuser.GetGroup(c.state.Mountpoint, group)
-			if err != nil {
-				return nil, err
-			}
+		gids, _ := lookup.GetContainerGroups(c.config.Groups, c.state.Mountpoint, nil)
+		for _, gid := range gids {
 			g.AddProcessAdditionalGid(gid)
 		}
 	}
@@ -237,26 +253,6 @@ func (c *Container) generateSpec(ctx context.Context) (*spec.Spec, error) {
 
 	// Look up and add groups the user belongs to, if a group wasn't directly specified
 	if !rootless.IsRootless() && !strings.Contains(c.config.User, ":") {
-		var groupDest, passwdDest string
-		defaultExecUser := user.ExecUser{
-			Uid:  0,
-			Gid:  0,
-			Home: "/",
-		}
-
-		// Make sure the /etc/group  and /etc/passwd destinations are not a symlink to something naughty
-		if groupDest, err = securejoin.SecureJoin(c.state.Mountpoint, "/etc/group"); err != nil {
-			logrus.Debug(err)
-			return nil, err
-		}
-		if passwdDest, err = securejoin.SecureJoin(c.state.Mountpoint, "/etc/passwd"); err != nil {
-			logrus.Debug(err)
-			return nil, err
-		}
-		execUser, err := user.GetExecUserPath(c.config.User, &defaultExecUser, passwdDest, groupDest)
-		if err != nil {
-			return nil, err
-		}
 		for _, gid := range execUser.Sgids {
 			g.AddProcessAdditionalGid(uint32(gid))
 		}
@@ -386,19 +382,31 @@ func (c *Container) setupSystemd(mounts []spec.Mount, g generate.Generator) erro
 		g.AddMount(tmpfsMnt)
 	}
 
-	cgroupPath, err := c.CGroupPath()
-	if err != nil {
-		return err
-	}
-	sourcePath := filepath.Join("/sys/fs/cgroup/systemd", cgroupPath)
+	// rootless containers have no write access to /sys/fs/cgroup, so don't
+	// add any mount into the container.
+	if !rootless.IsRootless() {
+		cgroupPath, err := c.CGroupPath()
+		if err != nil {
+			return err
+		}
+		sourcePath := filepath.Join("/sys/fs/cgroup/systemd", cgroupPath)
 
-	systemdMnt := spec.Mount{
-		Destination: "/sys/fs/cgroup/systemd",
-		Type:        "bind",
-		Source:      sourcePath,
-		Options:     []string{"bind", "private"},
+		systemdMnt := spec.Mount{
+			Destination: "/sys/fs/cgroup/systemd",
+			Type:        "bind",
+			Source:      sourcePath,
+			Options:     []string{"bind", "private"},
+		}
+		g.AddMount(systemdMnt)
+	} else {
+		systemdMnt := spec.Mount{
+			Destination: "/sys/fs/cgroup/systemd",
+			Type:        "bind",
+			Source:      "/sys/fs/cgroup/systemd",
+			Options:     []string{"bind", "nodev", "noexec", "nosuid"},
+		}
+		g.AddMount(systemdMnt)
 	}
-	g.AddMount(systemdMnt)
 
 	return nil
 }
@@ -510,9 +518,6 @@ func (c *Container) restore(ctx context.Context, keep bool) (err error) {
 		}
 	}
 
-	if err := c.prepare(); err != nil {
-		return err
-	}
 	defer func() {
 		if err != nil {
 			if err2 := c.cleanup(ctx); err2 != nil {
@@ -520,6 +525,10 @@ func (c *Container) restore(ctx context.Context, keep bool) (err error) {
 			}
 		}
 	}()
+
+	if err := c.prepare(); err != nil {
+		return err
+	}
 
 	// TODO: use existing way to request static IPs, once it is merged in ocicni
 	// https://github.com/cri-o/ocicni/pull/23/

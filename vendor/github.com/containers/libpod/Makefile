@@ -1,6 +1,6 @@
 GO ?= go
 DESTDIR ?= /
-EPOCH_TEST_COMMIT ?= 733cfe96819e1dc044e982b5321b3c902d1a47c6
+EPOCH_TEST_COMMIT ?= 921ccac10c47e0865ec5e4ba00ebb69a03d89473
 HEAD ?= HEAD
 CHANGELOG_BASE ?= HEAD~
 CHANGELOG_TARGET ?= HEAD
@@ -23,7 +23,7 @@ BUILDTAGS_CROSS ?= containers_image_openpgp containers_image_ostree_stub exclude
 ifneq (,$(findstring varlink,$(BUILDTAGS)))
 	PODMAN_VARLINK_DEPENDENCIES = cmd/podman/varlink/iopodman.go
 endif
-CONTAINER_RUNTIME := $(shell command -v podman 2> /dev/null | echo docker)
+CONTAINER_RUNTIME := $(shell command -v podman 2> /dev/null || echo docker)
 
 HAS_PYTHON3 := $(shell command -v python3 2>/dev/null)
 
@@ -36,7 +36,8 @@ PACKAGES ?= $(shell $(GO) list -tags "${BUILDTAGS}" ./... | grep -v github.com/c
 COMMIT_NO ?= $(shell git rev-parse HEAD 2> /dev/null || true)
 GIT_COMMIT ?= $(if $(shell git status --porcelain --untracked-files=no),"${COMMIT_NO}-dirty","${COMMIT_NO}")
 BUILD_INFO ?= $(shell date +%s)
-LDFLAGS_PODMAN ?= $(LDFLAGS) -X main.gitCommit=$(GIT_COMMIT) -X main.buildInfo=$(BUILD_INFO)
+LIBPOD := ${PROJECT}/libpod
+LDFLAGS_PODMAN ?= $(LDFLAGS) -X $(LIBPOD).gitCommit=$(GIT_COMMIT) -X $(LIBPOD).buildInfo=$(BUILD_INFO)
 ISODATE ?= $(shell date --iso-8601)
 LIBSECCOMP_COMMIT := release-2.3
 

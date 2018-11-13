@@ -91,7 +91,8 @@ import:
   version: master
 # builds
 - package: github.com/containers/buildah
-  version: master
+  repo:    https://github.com/runcom/buildah
+  version: nalind-blobcache
 - package: github.com/containers/image
   repo:    https://github.com/nalind/image
   version: ip-registry

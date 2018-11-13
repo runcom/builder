@@ -167,6 +167,10 @@ type BuildOptions struct {
 	// ForceRmIntermediateCtrs tells the builder to remove all intermediate containers even if
 	// the build was unsuccessful.
 	ForceRmIntermediateCtrs bool
+	// BlobDirectories are one or more directories in which we'll store blobs of images that
+	// we pull, and use at commit-time to skip recompressing layers.  Images built using blob
+	// directories need to be Push()ed with those directories and those contents available.
+	BlobDirectories []string
 }
 
 // Executor is a buildah-based implementation of the imagebuilder.Executor
@@ -222,7 +226,7 @@ type Executor struct {
 	forceRmIntermediateCtrs        bool
 	containerIDs                   []string          // Stores the IDs of the successful intermediate containers used during layer build
 	imageMap                       map[string]string // Used to map images that we create to handle the AS construct.
-
+	blobDirectories                []string
 }
 
 // withName creates a new child executor that will be used whenever a COPY statement uses --from=NAME.
@@ -596,6 +600,7 @@ func NewExecutor(store storage.Store, options BuildOptions) (*Executor, error) {
 		noCache:                        options.NoCache,
 		removeIntermediateCtrs:         options.RemoveIntermediateCtrs,
 		forceRmIntermediateCtrs:        options.ForceRmIntermediateCtrs,
+		blobDirectories:                append([]string{}, options.BlobDirectories...),
 	}
 	if exec.err == nil {
 		exec.err = os.Stderr
@@ -645,12 +650,18 @@ func (b *Executor) Prepare(ctx context.Context, stage imagebuilder.Stage, from s
 		b.log("FROM %s", displayFrom)
 	}
 
+	blobDirectory := ""
+	if len(b.blobDirectories) > 0 && b.blobDirectories[0] != "" {
+		blobDirectory = b.blobDirectories[0]
+	}
+
 	builderOptions := buildah.BuilderOptions{
 		Args:                  ib.Args,
 		FromImage:             from,
 		PullPolicy:            b.pullPolicy,
 		Registry:              b.registry,
 		Transport:             b.transport,
+		PullBlobDirectory:     blobDirectory,
 		SignaturePolicyPath:   b.signaturePolicyPath,
 		ReportWriter:          b.reportWriter,
 		SystemContext:         b.systemContext,
@@ -1161,6 +1172,7 @@ func (b *Executor) Commit(ctx context.Context, ib *imagebuilder.Builder, created
 		SystemContext:         b.systemContext,
 		IIDFile:               b.iidfile,
 		Squash:                b.squash,
+		BlobDirectories:       b.blobDirectories,
 		Parent:                b.builder.FromImageID,
 	}
 	imgID, ref, _, err := b.builder.Commit(ctx, imageRef, options)
@@ -1286,15 +1298,24 @@ func BuildDockerfiles(ctx context.Context, store storage.Store, options BuildOpt
 		} else {
 			// If the Dockerfile isn't found try prepending the
 			// context directory to it.
-			if _, err := os.Stat(dfile); os.IsNotExist(err) {
+			dinfo, err := os.Stat(dfile)
+			if os.IsNotExist(err) {
 				dfile = filepath.Join(options.ContextDirectory, dfile)
+			}
+			dinfo, err = os.Stat(dfile)
+			if err != nil {
+				return "", nil, errors.Wrapf(err, "error reading info about %q", dfile)
+			}
+			// If given a directory, add '/Dockerfile' to it.
+			if dinfo.Mode().IsDir() {
+				dfile = filepath.Join(dfile, "Dockerfile")
 			}
 			logrus.Debugf("reading local Dockerfile %q", dfile)
 			contents, err := os.Open(dfile)
 			if err != nil {
 				return "", nil, errors.Wrapf(err, "error reading %q", dfile)
 			}
-			dinfo, err := contents.Stat()
+			dinfo, err = contents.Stat()
 			if err != nil {
 				contents.Close()
 				return "", nil, errors.Wrapf(err, "error reading info about %q", dfile)
@@ -1333,7 +1354,10 @@ func BuildDockerfiles(ctx context.Context, store storage.Store, options BuildOpt
 		return "", nil, errors.Wrapf(err, "error creating build executor")
 	}
 	b := imagebuilder.NewBuilder(options.Args)
-	stages := imagebuilder.NewStages(mainNode, b)
+	stages, err := imagebuilder.NewStages(mainNode, b)
+	if err != nil {
+		return "", nil, err
+	}
 	return exec.Build(ctx, stages)
 }
 

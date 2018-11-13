@@ -57,22 +57,24 @@ type containerImageRef struct {
 	squash                bool
 	tarPath               func(path string) (io.ReadCloser, error)
 	parent                string
+	blobDirectories       []string
 }
 
 type containerImageSource struct {
-	path         string
-	ref          *containerImageRef
-	store        storage.Store
-	containerID  string
-	mountLabel   string
-	layerID      string
-	names        []string
-	compression  archive.Compression
-	config       []byte
-	configDigest digest.Digest
-	manifest     []byte
-	manifestType string
-	exporting    bool
+	path            string
+	ref             *containerImageRef
+	store           storage.Store
+	containerID     string
+	mountLabel      string
+	layerID         string
+	names           []string
+	compression     archive.Compression
+	config          []byte
+	configDigest    digest.Digest
+	manifest        []byte
+	manifestType    string
+	exporting       bool
+	blobDirectories []string
 }
 
 func (i *containerImageRef) NewImage(ctx context.Context, sc *types.SystemContext) (types.ImageCloser, error) {
@@ -105,11 +107,11 @@ func expectedDockerDiffIDs(image docker.V2Image) int {
 
 // Compute the media types which we need to attach to a layer, given the type of
 // compression that we'll be applying.
-func (i *containerImageRef) computeLayerMIMEType(what string) (omediaType, dmediaType string, err error) {
+func computeLayerMIMEType(what string, layerCompression archive.Compression) (omediaType, dmediaType string, err error) {
 	omediaType = v1.MediaTypeImageLayer
 	dmediaType = docker.V2S2MediaTypeUncompressedLayer
-	if i.compression != archive.Uncompressed {
-		switch i.compression {
+	if layerCompression != archive.Uncompressed {
+		switch layerCompression {
 		case archive.Gzip:
 			omediaType = v1.MediaTypeImageLayerGzip
 			dmediaType = manifest.DockerV2Schema2LayerMediaType
@@ -280,19 +282,62 @@ func (i *containerImageRef) NewImageSource(ctx context.Context, sc *types.System
 		// The default layer media type assumes no compression.
 		omediaType := v1.MediaTypeImageLayer
 		dmediaType := docker.V2S2MediaTypeUncompressedLayer
+		// Look up this layer.
+		layer, err := i.store.Layer(layerID)
+		if err != nil {
+			return nil, errors.Wrapf(err, "unable to locate layer %q", layerID)
+		}
+		// If the layer has a recorded digest and size (compressed or not), and we have a
+		// blob somewhere that matches that digest and size, just use that copy.
+		if layer.CompressedDigest != "" && layer.CompressedSize > 0 {
+			haveBlob := false
+			for _, blobDir := range i.blobDirectories {
+				blobPath := filepath.Join(blobDir, layer.CompressedDigest.String())
+				fileInfo, err := os.Stat(blobPath)
+				if err != nil {
+					continue
+				}
+				if fileInfo.Size() != layer.CompressedSize {
+					continue
+				}
+				haveBlob = true
+				break
+			}
+			if haveBlob {
+				// Figure out what to change the media type to, to match the compressed blob.
+				omediaType, dmediaType, err = computeLayerMIMEType(what, layer.CompressionType)
+				if err != nil {
+					return nil, err
+				}
+				// Note this layer in the manifest, using the compressed blobsum and size.
+				olayerDescriptor := v1.Descriptor{
+					MediaType: omediaType,
+					Digest:    layer.CompressedDigest,
+					Size:      layer.CompressedSize,
+				}
+				omanifest.Layers = append(omanifest.Layers, olayerDescriptor)
+				dlayerDescriptor := docker.V2S2Descriptor{
+					MediaType: dmediaType,
+					Digest:    layer.CompressedDigest,
+					Size:      layer.CompressedSize,
+				}
+				dmanifest.Layers = append(dmanifest.Layers, dlayerDescriptor)
+				// Note this layer in the list of diffIDs, using the uncompressed blobsum.
+				oimage.RootFS.DiffIDs = append(oimage.RootFS.DiffIDs, layer.UncompressedDigest)
+				dimage.RootFS.DiffIDs = append(dimage.RootFS.DiffIDs, layer.UncompressedDigest)
+				continue
+			}
+		}
 		// If we're not re-exporting the data, and we're reusing layers individually, reuse
 		// the blobsum and diff IDs.
 		if !i.exporting && !i.squash && layerID != i.layerID {
-			layer, err2 := i.store.Layer(layerID)
-			if err2 != nil {
-				return nil, errors.Wrapf(err, "unable to locate layer %q", layerID)
-			}
 			if layer.UncompressedDigest == "" {
 				return nil, errors.Errorf("unable to look up size of layer %q", layerID)
 			}
 			layerBlobSum := layer.UncompressedDigest
 			layerBlobSize := layer.UncompressedSize
-			// Note this layer in the manifest, using the uncompressed blobsum.
+			diffID := layer.UncompressedDigest
+			// Note this layer in the manifest, using the appropriate blobsum.
 			olayerDescriptor := v1.Descriptor{
 				MediaType: omediaType,
 				Digest:    layerBlobSum,
@@ -305,13 +350,13 @@ func (i *containerImageRef) NewImageSource(ctx context.Context, sc *types.System
 				Size:      layerBlobSize,
 			}
 			dmanifest.Layers = append(dmanifest.Layers, dlayerDescriptor)
-			// Note this layer in the list of diffIDs, again using the uncompressed blobsum.
-			oimage.RootFS.DiffIDs = append(oimage.RootFS.DiffIDs, layerBlobSum)
-			dimage.RootFS.DiffIDs = append(dimage.RootFS.DiffIDs, layerBlobSum)
+			// Note this layer in the list of diffIDs, again using the uncompressed digest.
+			oimage.RootFS.DiffIDs = append(oimage.RootFS.DiffIDs, diffID)
+			dimage.RootFS.DiffIDs = append(dimage.RootFS.DiffIDs, diffID)
 			continue
 		}
 		// Figure out if we need to change the media type, in case we're using compression.
-		omediaType, dmediaType, err = i.computeLayerMIMEType(what)
+		omediaType, dmediaType, err = computeLayerMIMEType(what, i.compression)
 		if err != nil {
 			return nil, err
 		}
@@ -368,8 +413,30 @@ func (i *containerImageRef) NewImageSource(ctx context.Context, sc *types.System
 		}
 		logrus.Debugf("%s size is %d bytes", what, size)
 		// Rename the layer so that we can more easily find it by digest later.
-		if err = os.Rename(filepath.Join(path, "layer"), filepath.Join(path, destHasher.Digest().String())); err != nil {
-			return nil, errors.Wrapf(err, "error storing %s to file while renaming %q to %q", what, filepath.Join(path, "layer"), filepath.Join(path, destHasher.Digest().String()))
+		finalBlobName := filepath.Join(path, destHasher.Digest().String())
+		if err = os.Rename(filepath.Join(path, "layer"), finalBlobName); err != nil {
+			return nil, errors.Wrapf(err, "error storing %s to file while renaming %q to %q", what, filepath.Join(path, "layer"), finalBlobName)
+		}
+		// If we're supposed to store blobs, store the compressed blob in the right directory.
+		if len(i.blobDirectories) > 0 && i.blobDirectories[0] != "" {
+			blobPath := filepath.Join(i.blobDirectories[0], destHasher.Digest().String())
+			// Try to hard link it first.
+			if err := os.Link(finalBlobName, blobPath); err != nil {
+				// If that doesn't work, copy the file.
+				firstCopy, err := os.Open(finalBlobName)
+				if err != nil {
+					return nil, errors.Wrapf(err, "error opening %q to copy to directory %q", finalBlobName, i.blobDirectories[0])
+				}
+				defer firstCopy.Close()
+				cacheCopy, err := os.OpenFile(blobPath, os.O_CREATE|os.O_WRONLY, 0600)
+				if err != nil {
+					return nil, errors.Wrapf(err, "error opening %q to hold copy of %q", blobPath, finalBlobName)
+				}
+				defer cacheCopy.Close()
+				if _, err := io.Copy(cacheCopy, firstCopy); err != nil {
+					return nil, errors.Wrapf(err, "error copying %q to %q", blobPath, finalBlobName)
+				}
+			}
 		}
 		// Add a note in the manifest about the layer.  The blobs are identified by their possibly-
 		// compressed blob digests.
@@ -472,19 +539,20 @@ func (i *containerImageRef) NewImageSource(ctx context.Context, sc *types.System
 		panic("unreachable code: unsupported manifest type")
 	}
 	src = &containerImageSource{
-		path:         path,
-		ref:          i,
-		store:        i.store,
-		containerID:  i.containerID,
-		mountLabel:   i.mountLabel,
-		layerID:      i.layerID,
-		names:        i.names,
-		compression:  i.compression,
-		config:       config,
-		configDigest: digest.Canonical.FromBytes(config),
-		manifest:     imageManifest,
-		manifestType: manifestType,
-		exporting:    i.exporting,
+		path:            path,
+		ref:             i,
+		store:           i.store,
+		containerID:     i.containerID,
+		mountLabel:      i.mountLabel,
+		layerID:         i.layerID,
+		names:           i.names,
+		compression:     i.compression,
+		config:          config,
+		configDigest:    digest.Canonical.FromBytes(config),
+		manifest:        imageManifest,
+		manifestType:    manifestType,
+		exporting:       i.exporting,
+		blobDirectories: copyStringSlice(i.blobDirectories),
 	}
 	return src, nil
 }
@@ -561,7 +629,16 @@ func (i *containerImageSource) GetBlob(ctx context.Context, blob types.BlobInfo)
 		}
 		return ioutils.NewReadCloserWrapper(reader, closer), reader.Size(), nil
 	}
-	layerFile, err := os.OpenFile(filepath.Join(i.path, blob.Digest.String()), os.O_RDONLY, 0600)
+	var layerFile *os.File
+	for _, path := range append(i.blobDirectories, i.path) {
+		layerFile, err = os.OpenFile(filepath.Join(path, blob.Digest.String()), os.O_RDONLY, 0600)
+		if err == nil {
+			break
+		}
+		if !os.IsNotExist(err) {
+			logrus.Debugf("error checking for layer %q in %q: %v", blob.Digest.String(), path, err)
+		}
+	}
 	if err != nil {
 		logrus.Debugf("error reading layer %q: %v", blob.Digest.String(), err)
 		return nil, -1, errors.Wrapf(err, "error opening file %q to buffer layer blob", filepath.Join(i.path, blob.Digest.String()))
@@ -584,7 +661,7 @@ func (i *containerImageSource) GetBlob(ctx context.Context, blob types.BlobInfo)
 	return ioutils.NewReadCloserWrapper(layerFile, closer), size, nil
 }
 
-func (b *Builder) makeImageRef(manifestType, parent string, exporting bool, squash bool, compress archive.Compression, historyTimestamp *time.Time) (types.ImageReference, error) {
+func (b *Builder) makeImageRef(manifestType, parent string, exporting bool, squash bool, blobDirectories []string, compress archive.Compression, historyTimestamp *time.Time) (types.ImageReference, error) {
 	var name reference.Named
 	container, err := b.store.Container(b.ContainerID)
 	if err != nil {
@@ -630,6 +707,7 @@ func (b *Builder) makeImageRef(manifestType, parent string, exporting bool, squa
 		squash:                squash,
 		tarPath:               b.tarPath(),
 		parent:                parent,
+		blobDirectories:       copyStringSlice(blobDirectories),
 	}
 	return ref, nil
 }

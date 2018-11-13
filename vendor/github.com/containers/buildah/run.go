@@ -1060,24 +1060,28 @@ func (b *Builder) Run(command []string, options RunOptions) error {
 	}
 	rootIDPair := &idtools.IDPair{UID: int(rootUID), GID: int(rootGID)}
 
-	hostFile, err := b.addNetworkConfig(path, "/etc/hosts", rootIDPair)
-	if err != nil {
-		return err
-	}
-	resolvFile, err := b.addNetworkConfig(path, "/etc/resolv.conf", rootIDPair)
-	if err != nil {
-		return err
+	bindFiles := make(map[string]string)
+	namespaceOptions := append(b.NamespaceOptions, options.NamespaceOptions...)
+	networkNamespace := namespaceOptions.Find(string(specs.NetworkNamespace))
+	if networkNamespace == nil || networkNamespace.Host || networkNamespace.Path != "" {
+		hostFile, err := b.addNetworkConfig(path, "/etc/hosts", rootIDPair)
+		if err != nil {
+			return err
+		}
+		bindFiles["/etc/hosts"] = hostFile
+
+		if err := addHostsToFile(b.CommonBuildOpts.AddHost, hostFile); err != nil {
+			return err
+		}
+
+		resolvFile, err := b.addNetworkConfig(path, "/etc/resolv.conf", rootIDPair)
+		if err != nil {
+			return err
+		}
+		bindFiles["/etc/resolv.conf"] = resolvFile
 	}
 
-	if err := addHostsToFile(b.CommonBuildOpts.AddHost, hostFile); err != nil {
-		return err
-	}
-
-	bindFiles := map[string]string{
-		"/etc/hosts":       hostFile,
-		"/etc/resolv.conf": resolvFile,
-	}
-	err = b.setupMounts(mountPoint, spec, path, options.Mounts, bindFiles, b.Volumes(), b.CommonBuildOpts.Volumes, b.CommonBuildOpts.ShmSize, append(b.NamespaceOptions, options.NamespaceOptions...))
+	err = b.setupMounts(mountPoint, spec, path, options.Mounts, bindFiles, b.Volumes(), b.CommonBuildOpts.Volumes, b.CommonBuildOpts.ShmSize, namespaceOptions)
 	if err != nil {
 		return errors.Wrapf(err, "error resolving mountpoints for container %q", b.ContainerID)
 	}
@@ -1139,10 +1143,21 @@ func checkAndOverrideIsolationOptions(isolation Isolation, options *RunOptions) 
 			logrus.Debugf("Forcing use of an IPC namespace.")
 		}
 		options.NamespaceOptions.AddOrReplace(NamespaceOption{Name: string(specs.IPCNamespace)})
-		if ns := options.NamespaceOptions.Find(string(specs.NetworkNamespace)); ns != nil && !ns.Host {
-			logrus.Debugf("Disabling network namespace.")
+		hostNetworking := true
+		networkNamespacePath := ""
+		if ns := options.NamespaceOptions.Find(string(specs.NetworkNamespace)); ns != nil {
+			hostNetworking = ns.Host
+			networkNamespacePath = ns.Path
+			if !hostNetworking && networkNamespacePath != "" && !filepath.IsAbs(networkNamespacePath) {
+				logrus.Debugf("Disabling network namespace configuration.")
+				networkNamespacePath = ""
+			}
 		}
-		options.NamespaceOptions.AddOrReplace(NamespaceOption{Name: string(specs.NetworkNamespace), Host: true})
+		options.NamespaceOptions.AddOrReplace(NamespaceOption{
+			Name: string(specs.NetworkNamespace),
+			Host: hostNetworking,
+			Path: networkNamespacePath,
+		})
 		if ns := options.NamespaceOptions.Find(string(specs.PIDNamespace)); ns == nil || ns.Host {
 			logrus.Debugf("Forcing use of a PID namespace.")
 		}
