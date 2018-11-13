@@ -19,6 +19,7 @@ import (
 	"github.com/containers/image/types"
 	"github.com/containers/storage"
 	docker "github.com/fsouza/go-dockerclient"
+
 	//"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/containers/buildah"
 
@@ -443,11 +444,12 @@ func extractSourceFromImage(ctx context.Context, dockerClient DockerClient, stor
 	}
 
 	builderOptions := buildah.BuilderOptions{
-		FromImage:       image,
-		PullPolicy:      pullPolicy,
-		ReportWriter:    os.Stdout,
-		SystemContext:   &systemContext,
-		CommonBuildOpts: &buildah.CommonBuildOptions{},
+		PullBlobDirectory: "/var/buildah/cache",
+		FromImage:         image,
+		PullPolicy:        pullPolicy,
+		ReportWriter:      os.Stdout,
+		SystemContext:     &systemContext,
+		CommonBuildOpts:   &buildah.CommonBuildOptions{},
 	}
 
 	builder, err := buildah.NewBuilder(ctx, store, builderOptions)

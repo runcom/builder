@@ -32,6 +32,7 @@ RUN INSTALL_PKGS=" \
 COPY imagecontent/policy.json /etc/containers/
 COPY imagecontent/registries.conf /etc/containers/
 COPY imagecontent/storage.conf /etc/containers/
+RUN mkdir -p /var/buildah/cache
 
 COPY --from=0 /go/src/github.com/openshift/builder/openshift-builder /usr/bin
 RUN ln -s /usr/bin/openshift-builder /usr/bin/openshift-sti-build && \
