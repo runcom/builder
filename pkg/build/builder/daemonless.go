@@ -47,11 +47,6 @@ func pullDaemonlessImage(sc types.SystemContext, store storage.Store, imageName 
 	// }
 	systemContext.AuthFilePath = "/tmp/config.json"
 
-	registries, err := sysregistriesv2.GetRegistries(&systemContext)
-	if err != nil {
-		return fmt.Errorf("error reading system registries configuration: %v", err)
-	}
-
 	ref, err := reference.Parse(imageName)
 	if err != nil {
 		return fmt.Errorf("error parsing image name %s: %v", ref, err)
@@ -68,10 +63,10 @@ func pullDaemonlessImage(sc types.SystemContext, store storage.Store, imageName 
 		}
 	}
 
-	if registry := sysregistriesv2.FindRegistry(imageName, registries); registry != nil {
+	if registry, err := sysregistriesv2.FindRegistry(&systemContext, imageName); err == nil {
 		if registry.Insecure {
 			glog.V(2).Infof("Registry %q is marked as insecure in the registries configuration.", registry.URL)
-			systemContext.DockerInsecureSkipTLSVerify = true
+			systemContext.DockerInsecureSkipTLSVerify = types.OptionalBoolTrue
 			systemContext.OCIInsecureSkipTLSVerify = true
 		} else {
 			glog.V(2).Infof("Registry %q is marked as secure in the registries configuration.", registry.URL)
@@ -257,14 +252,10 @@ func pushDaemonlessImage(sc types.SystemContext, store storage.Store, imageName 
 		glog.V(2).Infof("No authentication secret provided for pushing to registry.")
 	}
 
-	registries, err := sysregistriesv2.GetRegistries(&systemContext)
-	if err != nil {
-		return "", fmt.Errorf("error reading system registries configuration: %v", err)
-	}
-	if registry := sysregistriesv2.FindRegistry(imageName, registries); registry != nil {
+	if registry, err := sysregistriesv2.FindRegistry(&systemContext, imageName); err == nil {
 		if registry.Insecure {
 			glog.V(2).Infof("Registry %q is marked as insecure in the registries configuration.", registry.URL)
-			systemContext.DockerInsecureSkipTLSVerify = true
+			systemContext.DockerInsecureSkipTLSVerify = types.OptionalBoolTrue
 			systemContext.OCIInsecureSkipTLSVerify = true
 		} else {
 			glog.V(2).Infof("Registry %q is marked as secure in the registries configuration.", registry.URL)

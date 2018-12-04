@@ -19,6 +19,7 @@ import (
 	"github.com/containers/image/types"
 	"github.com/containers/storage"
 	docker "github.com/fsouza/go-dockerclient"
+
 	//"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/containers/buildah"
 
@@ -428,7 +429,7 @@ func extractSourceFromImage(ctx context.Context, dockerClient DockerClient, stor
 
 	// TODO remove this, get CAs+insecure registry config from host.
 	systemContext.OCIInsecureSkipTLSVerify = true
-	systemContext.DockerInsecureSkipTLSVerify = true
+	systemContext.DockerInsecureSkipTLSVerify = types.OptionalBoolTrue
 
 	if auths != nil {
 		for registry, ac := range auths.Configs {
