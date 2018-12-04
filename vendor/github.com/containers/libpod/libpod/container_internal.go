@@ -273,6 +273,27 @@ func (c *Container) setupStorage(ctx context.Context) error {
 		},
 		LabelOpts: c.config.LabelOpts,
 	}
+	if c.config.Privileged {
+		privOpt := func(opt string) bool {
+			for _, privopt := range []string{"nodev", "nosuid", "noexec"} {
+				if opt == privopt {
+					return true
+				}
+			}
+			return false
+		}
+		defOptions, err := storage.GetDefaultMountOptions()
+		if err != nil {
+			return errors.Wrapf(err, "error getting default mount options")
+		}
+		var newOptions []string
+		for _, opt := range defOptions {
+			if !privOpt(opt) {
+				newOptions = append(newOptions, opt)
+			}
+		}
+		options.MountOpts = newOptions
+	}
 
 	if c.config.Rootfs == "" {
 		options.IDMappingOptions = c.config.IDMappings
@@ -586,7 +607,7 @@ func (c *Container) completeNetworkSetup() error {
 	if err := c.syncContainer(); err != nil {
 		return err
 	}
-	if rootless.IsRootless() {
+	if c.config.NetMode == "slirp4netns" {
 		return c.runtime.setupRootlessNetNS(c)
 	}
 	return c.runtime.setupNetNS(c)
@@ -606,7 +627,7 @@ func (c *Container) init(ctx context.Context) error {
 	}
 
 	// With the spec complete, do an OCI create
-	if err := c.runtime.ociRuntime.createContainer(c, c.config.CgroupParent, false); err != nil {
+	if err := c.runtime.ociRuntime.createContainer(c, c.config.CgroupParent, nil); err != nil {
 		return err
 	}
 
@@ -821,28 +842,22 @@ func (c *Container) mountStorage() (string, error) {
 		return c.state.Mountpoint, nil
 	}
 
-	if !rootless.IsRootless() {
-		// TODO: generalize this mount code so it will mount every mount in ctr.config.Mounts
-		mounted, err := mount.Mounted(c.config.ShmDir)
-		if err != nil {
-			return "", errors.Wrapf(err, "unable to determine if %q is mounted", c.config.ShmDir)
-		}
+	mounted, err := mount.Mounted(c.config.ShmDir)
+	if err != nil {
+		return "", errors.Wrapf(err, "unable to determine if %q is mounted", c.config.ShmDir)
+	}
 
+	if !mounted {
+		shmOptions := fmt.Sprintf("mode=1777,size=%d", c.config.ShmSize)
+		if err := c.mountSHM(shmOptions); err != nil {
+			return "", err
+		}
 		if err := os.Chown(c.config.ShmDir, c.RootUID(), c.RootGID()); err != nil {
 			return "", errors.Wrapf(err, "failed to chown %s", c.config.ShmDir)
 		}
-
-		if !mounted {
-			shmOptions := fmt.Sprintf("mode=1777,size=%d", c.config.ShmSize)
-			if err := c.mountSHM(shmOptions); err != nil {
-				return "", err
-			}
-			if err := os.Chown(c.config.ShmDir, c.RootUID(), c.RootGID()); err != nil {
-				return "", errors.Wrapf(err, "failed to chown %s", c.config.ShmDir)
-			}
-		}
 	}
 
+	// TODO: generalize this mount code so it will mount every mount in ctr.config.Mounts
 	mountPoint := c.config.Rootfs
 	if mountPoint == "" {
 		mountPoint, err = c.mount()
@@ -1191,7 +1206,7 @@ func (c *Container) setupOCIHooks(ctx context.Context, config *spec.Spec) (exten
 			if c.runtime.config.HooksDirNotExistFatal || !os.IsNotExist(err) {
 				return nil, err
 			}
-			logrus.Warnf("failed to load hooks: {}", err)
+			logrus.Warnf("failed to load hooks: %q", err)
 			return nil, nil
 		}
 		hooks, err := manager.Hooks(config, c.Spec().Annotations, len(c.config.UserVolumes) > 0)

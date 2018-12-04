@@ -514,7 +514,7 @@ func (c *Container) checkpoint(ctx context.Context, options ContainerCheckpointO
 	return c.save()
 }
 
-func (c *Container) restore(ctx context.Context, keep bool) (err error) {
+func (c *Container) restore(ctx context.Context, options ContainerCheckpointOptions) (err error) {
 
 	if !criu.CheckForCriu() {
 		return errors.Errorf("restoring a container requires at least CRIU %d", criu.MinCriuVersion)
@@ -602,7 +602,7 @@ func (c *Container) restore(ctx context.Context, keep bool) (err error) {
 	// Cleanup for a working restore.
 	c.removeConmonFiles()
 
-	if err := c.runtime.ociRuntime.createContainer(c, c.config.CgroupParent, true); err != nil {
+	if err := c.runtime.ociRuntime.createContainer(c, c.config.CgroupParent, &options); err != nil {
 		return err
 	}
 
@@ -610,7 +610,7 @@ func (c *Container) restore(ctx context.Context, keep bool) (err error) {
 
 	c.state.State = ContainerStateRunning
 
-	if !keep {
+	if !options.Keep {
 		// Delete all checkpoint related files. At this point, in theory, all files
 		// should exist. Still ignoring errors for now as the container should be
 		// restored and running. Not erroring out just because some cleanup operation
@@ -729,9 +729,10 @@ func (c *Container) generateResolvConf() (string, error) {
 		return "", errors.Wrapf(err, "unable to read %s", resolvPath)
 	}
 
-	// Process the file to remove localhost nameservers
+	// Ensure that the container's /etc/resolv.conf is compatible with its
+	// network configuration.
 	// TODO: set ipv6 enable bool more sanely
-	resolv, err := resolvconf.FilterResolvDNS(contents, true)
+	resolv, err := resolvconf.FilterResolvDNS(contents, true, c.config.CreateNetNS)
 	if err != nil {
 		return "", errors.Wrapf(err, "error parsing host resolv.conf")
 	}
@@ -764,7 +765,7 @@ func (c *Container) generateResolvConf() (string, error) {
 
 	// Build resolv.conf
 	if _, err = resolvconf.Build(destPath, nameservers, search, options); err != nil {
-		return "", errors.Wrapf(err, "error building resolv.conf for container %s")
+		return "", errors.Wrapf(err, "error building resolv.conf for container %s", c.ID())
 	}
 
 	// Relabel resolv.conf for the container

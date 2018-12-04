@@ -91,10 +91,11 @@ import:
   version: master
 # builds
 - package: github.com/containers/buildah
-  version: master
+  repo:    https://github.com/mtrmac/buildah
+  version: blob-info-caching
 - package: github.com/containers/image
-  repo:    https://github.com/nalind/image
-  version: ip-registry
+  repo:    https://github.com/mtrmac/image
+  version: blob-info-caching
 # new enough to know how to disable itself when cross-compiling
 - package: github.com/opencontainers/selinux
   version: master

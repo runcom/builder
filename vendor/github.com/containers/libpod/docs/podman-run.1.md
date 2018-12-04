@@ -408,7 +408,8 @@ Set the Network mode for the container:
 - `container:<name|id>`: reuse another container's network stack
 - `host`: use the podman host network stack. Note: the host mode gives the container full access to local system services such as D-bus and is therefore considered insecure.
 - `<network-name>|<network-id>`: connect to a user-defined network
-- `ns:<path>` path to a network namespace to join
+- `ns:<path>`: path to a network namespace to join
+- `slirp4netns`: use slirp4netns to create a user network stack.  This is the default for rootless containers
 
 **--network-alias**=[]
 
@@ -450,8 +451,9 @@ container is not allowed to access any devices. A “privileged” container
 is given access to all devices.
 
 When the operator executes **podman run --privileged**, podman enables access
-to all devices on the host as well as set turn off most of the security measures
-protecting the host from the container.
+to all devices on the host, turns off graphdriver mount options, as well as
+turning off most of the security measures protecting the host from the
+container.
 
 **-p**, **--publish**=[]
 

@@ -43,6 +43,7 @@ func NewNewOptions(streams genericclioptions.IOStreams) *NewOptions {
 		IOStreams:      streams,
 		MaxPerRegistry: 4,
 		AlwaysInclude:  []string{"cluster-version-operator", "cli"},
+		ToImageBaseTag: "cluster-version-operator",
 	}
 }
 
@@ -52,6 +53,8 @@ func NewRelease(f kcmdutil.Factory, parentName string, streams genericclioptions
 		Use:   "new [SRC=DST ...]",
 		Short: "Create a new OpenShift release",
 		Long: templates.LongDesc(`
+			Build a new OpenShift release image that will update a cluster
+
 			OpenShift uses long-running active management processes called "operators" to
 			keep the cluster running and manage component lifecycle. This command
 			composes a set of images and operator definitions into a single update payload
@@ -115,6 +118,7 @@ func NewRelease(f kcmdutil.Factory, parentName string, streams genericclioptions
 	flags.StringVar(&o.ToFile, "to-file", o.ToFile, "Output the release to a tar file instead of creating an image.")
 	flags.StringVar(&o.ToImage, "to-image", o.ToImage, "The location to upload the release image to.")
 	flags.StringVar(&o.ToImageBase, "to-image-base", o.ToImageBase, "If specified, the image to add the release layer on top of.")
+	flags.StringVar(&o.ToImageBaseTag, "to-image-base-tag", o.ToImageBaseTag, "If specified, the image tag in the input to add the release layer on top of. Defaults to cluster-version-operator.")
 
 	// misc
 	flags.StringVarP(&o.Output, "output", "o", o.Output, "Output the mapping definition in this format.")
@@ -147,10 +151,11 @@ type NewOptions struct {
 
 	DryRun bool
 
-	ToFile      string
-	ToDir       string
-	ToImage     string
-	ToImageBase string
+	ToFile         string
+	ToDir          string
+	ToImage        string
+	ToImageBase    string
+	ToImageBaseTag string
 
 	Mirror string
 
@@ -264,7 +269,7 @@ func (o *NewOptions) Run() error {
 	now := time.Now().UTC()
 	name := o.Name
 	if len(name) == 0 {
-		name = "0.0.1-" + now.Format("2006-01-02T150405Z")
+		name = "0.0.1-" + now.Format("2006-01-02-150405")
 	}
 
 	var cm *CincinnatiMetadata
@@ -719,9 +724,14 @@ func (o *NewOptions) mirrorImages(is *imageapi.ImageStream, payload *Payload) er
 	if err := payload.Rewrite(false, targetFn); err != nil {
 		return fmt.Errorf("failed to update contents after mirroring: %v", err)
 	}
-	is, err = payload.References()
+	updated, err := payload.References()
 	if err != nil {
 		return fmt.Errorf("unable to recalculate image references: %v", err)
+	}
+	*is = *updated
+	if glog.V(4) {
+		data, _ := json.MarshalIndent(is, "", "  ")
+		glog.Infof("Image references updated to:\n%s", string(data))
 	}
 	return nil
 }
@@ -796,9 +806,21 @@ func (o *NewOptions) write(r io.Reader, is *imageapi.ImageStream, now time.Time)
 		if len(toRef.Tag) == 0 {
 			toRef.Tag = o.Name
 		}
+		toImageBase := o.ToImageBase
+		if len(toImageBase) == 0 && len(o.ToImageBaseTag) > 0 {
+			for _, tag := range is.Spec.Tags {
+				if tag.From != nil && tag.From.Kind == "DockerImage" && tag.Name == o.ToImageBaseTag {
+					toImageBase = tag.From.Name
+				}
+			}
+			if len(toImageBase) == 0 {
+				return fmt.Errorf("--to-image-base-tag did not point to a tag in the input")
+			}
+		}
+
 		options := imageappend.NewAppendImageOptions(genericclioptions.IOStreams{Out: o.Out, ErrOut: o.ErrOut})
 		options.DryRun = o.DryRun
-		options.From = o.ToImageBase
+		options.From = toImageBase
 		options.ConfigurationCallback = func(dgst digest.Digest, config *docker10.DockerImageConfig) error {
 			// reset any base image info
 			if len(config.OS) == 0 {

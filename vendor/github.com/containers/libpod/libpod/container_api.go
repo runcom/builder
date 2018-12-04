@@ -39,7 +39,7 @@ func (c *Container) Init(ctx context.Context) (err error) {
 
 	notRunning, err := c.checkDependenciesRunning()
 	if err != nil {
-		return errors.Wrapf(err, "error checking dependencies for container %s")
+		return errors.Wrapf(err, "error checking dependencies for container %s", c.ID())
 	}
 	if len(notRunning) > 0 {
 		depString := strings.Join(notRunning, ",")
@@ -93,7 +93,7 @@ func (c *Container) Start(ctx context.Context) (err error) {
 
 	notRunning, err := c.checkDependenciesRunning()
 	if err != nil {
-		return errors.Wrapf(err, "error checking dependencies for container %s")
+		return errors.Wrapf(err, "error checking dependencies for container %s", c.ID())
 	}
 	if len(notRunning) > 0 {
 		depString := strings.Join(notRunning, ",")
@@ -159,7 +159,7 @@ func (c *Container) StartAndAttach(ctx context.Context, streams *AttachStreams, 
 
 	notRunning, err := c.checkDependenciesRunning()
 	if err != nil {
-		return nil, errors.Wrapf(err, "error checking dependencies for container %s")
+		return nil, errors.Wrapf(err, "error checking dependencies for container %s", c.ID())
 	}
 	if len(notRunning) > 0 {
 		depString := strings.Join(notRunning, ",")
@@ -328,6 +328,11 @@ func (c *Container) Exec(tty, privileged bool, env, cmd []string, user string) e
 	if err != nil {
 		return errors.Wrapf(err, "error exec %s", c.ID())
 	}
+	chWait := make(chan error)
+	go func() {
+		chWait <- execCmd.Wait()
+	}()
+	defer close(chWait)
 
 	pidFile := c.execPidPath(sessionID)
 	// 60 second seems a reasonable time to wait
@@ -336,18 +341,12 @@ func (c *Container) Exec(tty, privileged bool, env, cmd []string, user string) e
 	const pidWaitTimeout = 60000
 
 	// Wait until the runtime makes the pidfile
-	// TODO: If runtime errors before the PID file is created, we have to
-	// wait for timeout here
-	if err := WaitForFile(pidFile, pidWaitTimeout*time.Millisecond); err != nil {
-		logrus.Debugf("Timed out waiting for pidfile from runtime for container %s exec", c.ID())
-
-		// Check if an error occurred in the process before we made a pidfile
-		// TODO: Wait() here is a poor choice - is there a way to see if
-		// a process has finished, instead of waiting for it to finish?
-		if err := execCmd.Wait(); err != nil {
+	exited, err := WaitForFile(pidFile, chWait, pidWaitTimeout*time.Millisecond)
+	if err != nil {
+		if exited {
+			// If the runtime exited, propagate the error we got from the process.
 			return err
 		}
-
 		return errors.Wrapf(err, "timed out waiting for runtime to create pidfile for exec session in container %s", c.ID())
 	}
 
@@ -389,7 +388,10 @@ func (c *Container) Exec(tty, privileged bool, env, cmd []string, user string) e
 		locked = false
 	}
 
-	waitErr := execCmd.Wait()
+	var waitErr error
+	if !exited {
+		waitErr = <-chWait
+	}
 
 	// Lock again
 	if !c.batched {
@@ -716,7 +718,7 @@ func (c *Container) RestartWithTimeout(ctx context.Context, timeout uint) (err e
 
 	notRunning, err := c.checkDependenciesRunning()
 	if err != nil {
-		return errors.Wrapf(err, "error checking dependencies for container %s")
+		return errors.Wrapf(err, "error checking dependencies for container %s", c.ID())
 	}
 	if len(notRunning) > 0 {
 		depString := strings.Join(notRunning, ",")
@@ -801,7 +803,7 @@ func (c *Container) Refresh(ctx context.Context) error {
 		return err
 	}
 
-	logrus.Debugf("Successfully refresh container %s state")
+	logrus.Debugf("Successfully refresh container %s state", c.ID())
 
 	// Initialize the container if it was created in runc
 	if wasCreated || wasRunning || wasPaused {
@@ -831,15 +833,21 @@ func (c *Container) Refresh(ctx context.Context) error {
 }
 
 // ContainerCheckpointOptions is a struct used to pass the parameters
-// for checkpointing to corresponding functions
+// for checkpointing (and restoring) to the corresponding functions
 type ContainerCheckpointOptions struct {
-	Keep        bool
+	// Keep tells the API to not delete checkpoint artifacts
+	Keep bool
+	// KeepRunning tells the API to keep the container running
+	// after writing the checkpoint to disk
 	KeepRunning bool
+	// TCPEstablished tells the API to checkpoint a container
+	// even if it contains established TCP connections
+	TCPEstablished bool
 }
 
 // Checkpoint checkpoints a container
 func (c *Container) Checkpoint(ctx context.Context, options ContainerCheckpointOptions) error {
-	logrus.Debugf("Trying to checkpoint container %s", c)
+	logrus.Debugf("Trying to checkpoint container %s", c.ID())
 	if !c.batched {
 		c.lock.Lock()
 		defer c.lock.Unlock()
@@ -853,8 +861,8 @@ func (c *Container) Checkpoint(ctx context.Context, options ContainerCheckpointO
 }
 
 // Restore restores a container
-func (c *Container) Restore(ctx context.Context, keep bool) (err error) {
-	logrus.Debugf("Trying to restore container %s", c)
+func (c *Container) Restore(ctx context.Context, options ContainerCheckpointOptions) (err error) {
+	logrus.Debugf("Trying to restore container %s", c.ID())
 	if !c.batched {
 		c.lock.Lock()
 		defer c.lock.Unlock()
@@ -864,5 +872,5 @@ func (c *Container) Restore(ctx context.Context, keep bool) (err error) {
 		}
 	}
 
-	return c.restore(ctx, keep)
+	return c.restore(ctx, options)
 }
