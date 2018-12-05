@@ -63,7 +63,7 @@ func pullDaemonlessImage(sc types.SystemContext, store storage.Store, imageName 
 		}
 	}
 
-	if registry, err := sysregistriesv2.FindRegistry(&systemContext, imageName); err == nil {
+	if registry, err := sysregistriesv2.FindRegistry(&systemContext, imageName); err == nil && registry != nil {
 		if registry.Insecure {
 			glog.V(2).Infof("Registry %q is marked as insecure in the registries configuration.", registry.URL)
 			systemContext.DockerInsecureSkipTLSVerify = types.OptionalBoolTrue
@@ -252,7 +252,7 @@ func pushDaemonlessImage(sc types.SystemContext, store storage.Store, imageName 
 		glog.V(2).Infof("No authentication secret provided for pushing to registry.")
 	}
 
-	if registry, err := sysregistriesv2.FindRegistry(&systemContext, imageName); err == nil {
+	if registry, err := sysregistriesv2.FindRegistry(&systemContext, imageName); err == nil && registry != nil {
 		if registry.Insecure {
 			glog.V(2).Infof("Registry %q is marked as insecure in the registries configuration.", registry.URL)
 			systemContext.DockerInsecureSkipTLSVerify = types.OptionalBoolTrue

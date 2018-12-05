@@ -14,7 +14,7 @@ const (
 	// If the format changes in an incompatible way, increase the version number.
 	blobInfoCacheFilename = "blob-info-cache-v1.boltdb"
 	// systemBlobInfoCacheDir is the directory containing the blob info cache (in blobInfocacheFilename) for root-running processes.
-	systemBlobInfoCacheDir = "/var/lib/containers"
+	systemBlobInfoCacheDir = "/etc/containers"
 )
 
 // blobInfoCacheDir returns a path to a blob info cache appropripate for sys and euid.
