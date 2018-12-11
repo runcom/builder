@@ -1,5 +1,5 @@
-hash: 178ee381d8a978c1bb95cc7591706fb2a3de2b55642c9fb62d7f03f83b87b2f8
-updated: 2018-11-27T14:07:43.127548898-05:00
+hash: 916fb19936d045042ec8443421cca51aabfb8fabdf130403aa75208a6e9fa3f5
+updated: 2018-12-11T10:08:51.127028098-05:00
 imports:
 - name: github.com/Azure/go-ansiterm
   version: 19f72df4d05d31cbe1c56bfc8045c96babff6c7e
@@ -74,11 +74,12 @@ imports:
   - pkg/rootless
   - pkg/secrets
 - name: github.com/containers/storage
-  version: c12292897a26de8bb20be9cfbee00a9d8ebad1b3
+  version: edbccd232115a2f8091b112ed81a1234cc391037
   subpackages:
   - drivers
   - drivers/aufs
   - drivers/btrfs
+  - drivers/copy
   - drivers/devmapper
   - drivers/overlay
   - drivers/overlayutils
