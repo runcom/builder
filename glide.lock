@@ -27,12 +27,13 @@ imports:
   - pkg/types/current
   - pkg/version
 - name: github.com/containers/buildah
-  version: 412617652af33064d599feb86bdf90af342c686c
+  version: 90ea8902609c83e57452b02528f25a49cdf4dfe6
   subpackages:
   - bind
   - chroot
   - docker
   - imagebuildah
+  - pkg/blobcache
   - unshare
   - util
 - name: github.com/containers/image
