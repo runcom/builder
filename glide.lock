@@ -34,8 +34,7 @@ imports:
   - unshare
   - util
 - name: github.com/containers/image
-  version: c15806b373f71526b451bcdd26996d7bdf6fb205
-  repo: https://github.com/nalind/image
+  version: 9f297120deb84f7da63088cc8e32c541f1b0e963
   subpackages:
   - copy
   - directory
@@ -54,6 +53,7 @@ imports:
   - oci/layout
   - openshift
   - ostree
+  - pkg/blobinfocache
   - pkg/compression
   - pkg/docker/config
   - pkg/strslice
