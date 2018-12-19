@@ -109,7 +109,7 @@ func PodmanTestCreate(tempDir string) *PodmanTestIntegration {
 	}
 	conmonBinary := filepath.Join("/usr/libexec/podman/conmon")
 	altConmonBinary := "/usr/libexec/crio/conmon"
-	if _, err := os.Stat(altConmonBinary); err == nil {
+	if _, err := os.Stat(conmonBinary); os.IsNotExist(err) {
 		conmonBinary = altConmonBinary
 	}
 	if os.Getenv("CONMON_BINARY") != "" {
@@ -181,6 +181,12 @@ func (p *PodmanTestIntegration) Podman(args []string) *PodmanSessionIntegration 
 	return &PodmanSessionIntegration{podmanSession}
 }
 
+// PodmanAsUser is the exec call to podman on the filesystem with the specified uid/gid and environment
+func (p *PodmanTestIntegration) PodmanAsUser(args []string, uid, gid uint32, env []string) *PodmanSessionIntegration {
+	podmanSession := p.PodmanAsUserBase(args, uid, gid, env)
+	return &PodmanSessionIntegration{podmanSession}
+}
+
 // PodmanPID execs podman and returns its PID
 func (p *PodmanTestIntegration) PodmanPID(args []string) (*PodmanSessionIntegration, int) {
 	podmanOptions := p.MakeOptions(args)
@@ -214,6 +220,17 @@ func (p *PodmanTestIntegration) Cleanup() {
 func (p *PodmanTestIntegration) CleanupPod() {
 	// Remove all containers
 	session := p.Podman([]string{"pod", "rm", "-fa"})
+	session.Wait(90)
+	// Nuke tempdir
+	if err := os.RemoveAll(p.TempDir); err != nil {
+		fmt.Printf("%q\n", err)
+	}
+}
+
+// CleanupVolume cleans up the temporary store
+func (p *PodmanTestIntegration) CleanupVolume() {
+	// Remove all containers
+	session := p.Podman([]string{"volume", "rm", "-fa"})
 	session.Wait(90)
 	// Nuke tempdir
 	if err := os.RemoveAll(p.TempDir); err != nil {

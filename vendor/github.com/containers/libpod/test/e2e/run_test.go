@@ -3,6 +3,7 @@ package integration
 import (
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -287,14 +288,27 @@ var _ = Describe("Podman run", func() {
 	})
 
 	It("podman run notify_socket", func() {
-		sock := "/run/notify"
+		host := GetHostDistributionInfo()
+		if host.Distribution != "rhel" && host.Distribution != "centos" && host.Distribution != "fedora" {
+			Skip("this test requires a working runc")
+		}
+		sock := filepath.Join(podmanTest.TempDir, "notify")
+		addr := net.UnixAddr{
+			Name: sock,
+			Net:  "unixgram",
+		}
+		socket, err := net.ListenUnixgram("unixgram", &addr)
+		Expect(err).To(BeNil())
+		defer os.Remove(sock)
+		defer socket.Close()
+
 		os.Setenv("NOTIFY_SOCKET", sock)
+		defer os.Unsetenv("NOTIFY_SOCKET")
+
 		session := podmanTest.Podman([]string{"run", "--rm", ALPINE, "printenv", "NOTIFY_SOCKET"})
 		session.WaitWithDefaultTimeout()
 		Expect(session.ExitCode()).To(Equal(0))
-		match, _ := session.GrepString(sock)
-		Expect(match).Should(BeTrue())
-		os.Unsetenv("NOTIFY_SOCKET")
+		Expect(len(session.OutputToStringArray())).To(BeNumerically(">", 0))
 	})
 
 	It("podman run log-opt", func() {
@@ -322,7 +336,7 @@ var _ = Describe("Podman run", func() {
 		hooksDir := tempdir + "/hooks"
 		os.Mkdir(hooksDir, 0755)
 		fileutils.CopyFile("hooks/hooks.json", hooksDir)
-		os.Setenv("HOOK_OPTION", fmt.Sprintf("--hooks-dir-path=%s", hooksDir))
+		os.Setenv("HOOK_OPTION", fmt.Sprintf("--hooks-dir=%s", hooksDir))
 		os.Remove(hcheck)
 		session := podmanTest.Podman([]string{"run", ALPINE, "ls"})
 		session.Wait(10)
@@ -613,5 +627,43 @@ USER mail`
 		// make sure it's only shared (and not 'shared,slave')
 		isSharedOnly := !strings.Contains(shared[0], "shared,")
 		Expect(isSharedOnly).Should(BeTrue())
+	})
+
+	It("podman run --pod automatically", func() {
+		session := podmanTest.Podman([]string{"run", "--pod", "new:foobar", ALPINE, "ls"})
+		session.WaitWithDefaultTimeout()
+		Expect(session.ExitCode()).To(Equal(0))
+
+		check := podmanTest.Podman([]string{"pod", "ps", "--no-trunc"})
+		check.WaitWithDefaultTimeout()
+		match, _ := check.GrepString("foobar")
+		Expect(match).To(BeTrue())
+	})
+
+	It("podman run --rm should work", func() {
+		session := podmanTest.Podman([]string{"run", "--rm", ALPINE, "ls"})
+		session.WaitWithDefaultTimeout()
+		Expect(session.ExitCode()).To(Equal(0))
+
+		numContainers := podmanTest.NumberOfContainers()
+		Expect(numContainers).To(Equal(0))
+	})
+
+	It("podman run --rm failed container should delete itself", func() {
+		session := podmanTest.Podman([]string{"run", "--rm", ALPINE, "foo"})
+		session.WaitWithDefaultTimeout()
+		Expect(session.ExitCode()).To(Not(Equal(0)))
+
+		numContainers := podmanTest.NumberOfContainers()
+		Expect(numContainers).To(Equal(0))
+	})
+
+	It("podman run failed container should NOT delete itself", func() {
+		session := podmanTest.Podman([]string{"run", ALPINE, "foo"})
+		session.WaitWithDefaultTimeout()
+		Expect(session.ExitCode()).To(Not(Equal(0)))
+
+		numContainers := podmanTest.NumberOfContainers()
+		Expect(numContainers).To(Equal(1))
 	})
 })

@@ -1,5 +1,5 @@
-hash: 916fb19936d045042ec8443421cca51aabfb8fabdf130403aa75208a6e9fa3f5
-updated: 2018-12-11T10:14:07.267230836-05:00
+hash: 37df4cf64becab0e6862309a77ff41a9cafc11b43b8b376cc4b7d9bf615ccbc5
+updated: 2018-12-19T11:47:29.312495186+01:00
 imports:
 - name: github.com/Azure/go-ansiterm
   version: 19f72df4d05d31cbe1c56bfc8045c96babff6c7e
@@ -14,7 +14,7 @@ imports:
 - name: github.com/certifi/gocertifi
   version: ee1a9a0726d2ae45f54118cac878c990d4016ded
 - name: github.com/containerd/continuity
-  version: bea7585dbfac2847dbf49a6b8e7738a36c09bc75
+  version: 004b46473808b3e7a4a3049c20e4376c91eb966d
   subpackages:
   - pathdriver
 - name: github.com/containernetworking/cni
@@ -27,7 +27,8 @@ imports:
   - pkg/types/current
   - pkg/version
 - name: github.com/containers/buildah
-  version: 90ea8902609c83e57452b02528f25a49cdf4dfe6
+  version: 06a274d105f59e6e4453a3a56545230d6b2c28da
+  repo: https://github.com/vrothberg/buildah
   subpackages:
   - bind
   - chroot
@@ -37,7 +38,7 @@ imports:
   - unshare
   - util
 - name: github.com/containers/image
-  version: 9f297120deb84f7da63088cc8e32c541f1b0e963
+  version: 50e5e55e46a391df8fce1291b2337f1af879b822
   subpackages:
   - copy
   - directory
@@ -71,13 +72,13 @@ imports:
   - types
   - version
 - name: github.com/containers/libpod
-  version: 3f0c0cf80f5cbb3d3049c690c697a7d46ecc9d3a
+  version: c8eaf59d5f4bec249db8134c6a9fcfbcac792519
   subpackages:
   - pkg/chrootuser
   - pkg/rootless
   - pkg/secrets
 - name: github.com/containers/storage
-  version: edbccd232115a2f8091b112ed81a1234cc391037
+  version: 08952cc0f581063dd731a7597a64626d5efa6331
   subpackages:
   - drivers
   - drivers/aufs
@@ -221,7 +222,7 @@ imports:
   - proto
   - sortkeys
 - name: github.com/golang/glog
-  version: 44145f04b68cf362d9c4df2182967c2275eaefed
+  version: 23def4e6c14b4da8ac2ed8007337bc5eb5007998
 - name: github.com/golang/groupcache
   version: 02826c3e79038b59d737d3b1c0a1d937f71a4433
   subpackages:
@@ -245,7 +246,7 @@ imports:
   - compiler
   - extensions
 - name: github.com/gorilla/mux
-  version: 3d80bc801bb034e17cae38591335b3b1110f1c47
+  version: 6137e193cdcba2725f16de84eaf0db2b769d9668
 - name: github.com/gregjones/httpcache
   version: 787624de3eb7bd915c329cba748687a3b22666a6
   subpackages:
@@ -264,6 +265,16 @@ imports:
   version: 76626ae9c91c4f2a10f34cad8ce83ea42c93bb75
 - name: github.com/json-iterator/go
   version: f2b4162afba35581b6d4a50d3b8f34e33c144682
+- name: github.com/klauspost/compress
+  version: 30be6041bed523c18e269a700ebd9c2ea9328574
+  subpackages:
+  - flate
+- name: github.com/klauspost/cpuid
+  version: c640019ed4bda023bac884990967336803e39e3a
+- name: github.com/klauspost/pgzip
+  version: 083b1c3f84dd6486588802e5ce295de3a7f41a8b
+- name: github.com/konsorten/go-windows-terminal-sequences
+  version: 5c8c8bd35d3832f5d134ae1e1e375b69a4d25242
 - name: github.com/mailru/easyjson
   version: 2f5df55504ebc322e4d52d34df6a1f5b503bf26d
   subpackages:
@@ -273,7 +284,7 @@ imports:
 - name: github.com/MakeNowJust/heredoc
   version: bb23615498cded5e105af4ce27de75b089cbe851
 - name: github.com/mattn/go-runewidth
-  version: c88d7e5f2e24de48a200a2655ac8a0910be9a0f7
+  version: 703b5e6b11ae25aeb2af9ebb5d5fdf8fa2575211
 - name: github.com/mattn/go-shellwords
   version: f8471b0a71ded0ab910825ee2cf230f25de000f1
 - name: github.com/Microsoft/go-winio
@@ -315,7 +326,7 @@ imports:
   subpackages:
   - specs-go
 - name: github.com/opencontainers/runtime-tools
-  version: a85cdea1b01dd84338c898abef8bc11fdcb671ee
+  version: f60dccdf95d16f99efb4f753efd0a05ec6109446
   subpackages:
   - error
   - filepath
@@ -324,12 +335,12 @@ imports:
   - specerror
   - validate
 - name: github.com/opencontainers/selinux
-  version: 6ba084dd09db3dfe49a839bab0bbe97fd9274d80
+  version: 51c6c0a5dbc675792e953298cb9871819d6f9bb8
   subpackages:
   - go-selinux
   - go-selinux/label
 - name: github.com/openshift/api
-  version: e7dc90658844828191986cb07f3e44eeeba0b03a
+  version: 797a09d386e407506afc2f8562f81d335d57aaab
   subpackages:
   - build/v1
 - name: github.com/openshift/client-go
@@ -341,14 +352,14 @@ imports:
   - build/clientset/versioned/typed/build/v1
   - build/clientset/versioned/typed/build/v1/fake
 - name: github.com/openshift/imagebuilder
-  version: f369cd69f8a8d8fc1fbdb87bef9e57c5b6c2bac3
+  version: 474d0f9df2cbabf006bd2b1c263a7b0789e228e0
   subpackages:
   - dockerclient
   - imageprogress
   - signal
   - strslice
 - name: github.com/openshift/library-go
-  version: a1ed078fcc8923663018a68dd66acb7e080d3f19
+  version: 2d609c3ef30cbfabb70f7a5f6660944cad97e815
   subpackages:
   - pkg/git
   - pkg/image/internal/digest
@@ -356,7 +367,7 @@ imports:
   - pkg/image/reference
   - pkg/serviceability
 - name: github.com/openshift/origin
-  version: b810af10160f206dc5b806b12528b3233386da40
+  version: abea3e8e0c0cc602b3bf5a63ddc53ea26b9ec54d
   subpackages:
   - pkg/api/apihelpers
   - pkg/build/apis/build
@@ -392,7 +403,7 @@ imports:
   - pkg/util/status
   - pkg/util/user
 - name: github.com/ostreedev/ostree-go
-  version: 9ab99253d365aac3a330d1f7281cf29f3d22820b
+  version: d0388bd827cfac6fa8eec760246eb8375674b2a0
   subpackages:
   - pkg/glibobject
   - pkg/otbuiltin
@@ -401,7 +412,7 @@ imports:
 - name: github.com/peterbourgon/diskv
   version: 5f041e8faa004a95c88a202771f4cc3e991971e6
 - name: github.com/pkg/errors
-  version: 645ef00459ed84a119197bfb8d8205042c6df63d
+  version: 059132a15dd08d6704c67711dae0cf35ab991756
 - name: github.com/pkg/profile
   version: 22592cc4bae3572d59be8852c6980023e4c9dec5
 - name: github.com/pquerna/ffjson
@@ -410,7 +421,7 @@ imports:
   - fflib/v1
   - fflib/v1/internal
 - name: github.com/prometheus/client_golang
-  version: e7e903064f5e9eb5da98208bae10b475d4db0f8c
+  version: ec7db558bc4ce351daf4ecd5ac46f145abf62300
   subpackages:
   - prometheus
 - name: github.com/PuerkitoBio/purell
@@ -426,7 +437,7 @@ imports:
 - name: github.com/shurcooL/sanitized_anchor_name
   version: 10ef21a441db47d8b13ebcc5fd2310f636973c77
 - name: github.com/sirupsen/logrus
-  version: 89742aefa4b206dcf400792f3bd35b542998eb3b
+  version: 2067ea4241cec716fbd0ac90f42f339f963bff92
 - name: github.com/spf13/cobra
   version: d2d81d9a96e23f0255397222bb0b4e3165e492dc
 - name: github.com/spf13/pflag
@@ -488,6 +499,10 @@ imports:
   - lex/httplex
   - proxy
   - websocket
+- name: golang.org/x/sync
+  version: 42b317875d0fa942474b76e1b46a6060d720ae6e
+  subpackages:
+  - semaphore
 - name: golang.org/x/sys
   version: d641721ec2dead6fe5ca284096fe4b1fcd49e427
   subpackages:
@@ -517,7 +532,7 @@ imports:
   subpackages:
   - rate
 - name: gopkg.in/cheggaaa/pb.v1
-  version: 007b75a044e968336a69a6c0c617251ab62ac14c
+  version: 1cc5bbe20449079337944d56292c7383510c534c
 - name: gopkg.in/inf.v0
   version: 3887ee99ecf07df5b447e9b00d9c0b2adaa9f3e4
 - name: gopkg.in/square/go-jose.v2

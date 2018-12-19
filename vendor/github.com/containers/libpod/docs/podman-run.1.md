@@ -408,7 +408,8 @@ Set the Network mode for the container:
 - `container:<name|id>`: reuse another container's network stack
 - `host`: use the podman host network stack. Note: the host mode gives the container full access to local system services such as D-bus and is therefore considered insecure.
 - `<network-name>|<network-id>`: connect to a user-defined network
-- `ns:<path>` path to a network namespace to join
+- `ns:<path>`: path to a network namespace to join
+- `slirp4netns`: use slirp4netns to create a user network stack.  This is the default for rootless containers
 
 **--network-alias**=[]
 
@@ -438,7 +439,8 @@ Tune the container's pids limit. Set `-1` to have unlimited pids for the contain
 
 **--pod**=""
 
-Run container in an existing pod
+Run container in an existing pod. If you want podman to make the pod for you, preference the pod name with `new:`.
+To make a pod with more granular options, use the `podman pod create` command before creating a container.
 
 **--privileged**=*true*|*false*
 
@@ -450,8 +452,9 @@ container is not allowed to access any devices. A “privileged” container
 is given access to all devices.
 
 When the operator executes **podman run --privileged**, podman enables access
-to all devices on the host as well as set turn off most of the security measures
-protecting the host from the container.
+to all devices on the host, turns off graphdriver mount options, as well as
+turning off most of the security measures protecting the host from the
+container.
 
 **-p**, **--publish**=[]
 
@@ -493,6 +496,14 @@ Mount the container's root filesystem as read only.
 By default a container will have its root filesystem writable allowing processes
 to write files anywhere.  By specifying the `--read-only` flag the container will have
 its root filesystem mounted as read only prohibiting any writes.
+
+**--restart=""**
+
+Not implemented.
+
+Restart should be handled via a systemd unit files. Please add your podman
+commands to a unit file and allow systemd or your init system to handle the
+restarting of the container processes. See example below.
 
 **--rm**=*true*|*false*
 
@@ -1056,13 +1067,28 @@ the uid and gid from the host.
 $ podman run --uidmap 0:30000:7000 --gidmap 0:30000:7000 fedora echo hello
 ```
 
+### Running a podman container to restart inside of a systemd unit file
+
+
+```
+[Unit]
+Description=My App
+[Service]
+Restart=always
+ExecStart=/usr/bin/podman start -a my_app
+ExecStop=/usr/bin/podman stop -t 10 my_app
+KillMode=process
+[Install]
+WantedBy=multi-user.target
+```
+
 ## FILES
 
 **/etc/subuid**
 **/etc/subgid**
 
 ## SEE ALSO
-subgid(5), subuid(5), libpod.conf(5)
+subgid(5), subuid(5), libpod.conf(5), systemd.unit(5)
 
 ## HISTORY
 September 2018, updated by Kunal Kushwaha <kushwaha_kunal_v7@lab.ntt.co.jp>

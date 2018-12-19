@@ -13,6 +13,7 @@ import (
 	"github.com/containers/libpod/libpod/image"
 	"github.com/containers/libpod/pkg/inspect"
 	"github.com/containers/libpod/pkg/namespaces"
+	"github.com/containers/libpod/pkg/rootless"
 	cc "github.com/containers/libpod/pkg/spec"
 	"github.com/containers/libpod/pkg/util"
 	"github.com/docker/docker/pkg/signal"
@@ -24,7 +25,7 @@ func (i *LibpodAPI) CreateContainer(call iopodman.VarlinkCall, config iopodman.C
 	rtc := i.Runtime.GetConfig()
 	ctx := getContext()
 
-	newImage, err := i.Runtime.ImageRuntime().New(ctx, config.Image, rtc.SignaturePolicyPath, "", os.Stderr, nil, image.SigningOptions{}, false, false)
+	newImage, err := i.Runtime.ImageRuntime().New(ctx, config.Image, rtc.SignaturePolicyPath, "", os.Stderr, nil, image.SigningOptions{}, false)
 	if err != nil {
 		return call.ReplyErrorOccurred(err.Error())
 	}
@@ -126,7 +127,11 @@ func varlinkCreateToCreateConfig(ctx context.Context, create iopodman.Create, ru
 	// NETWORK MODE
 	networkMode := create.Net_mode
 	if networkMode == "" {
-		networkMode = "bridge"
+		if rootless.IsRootless() {
+			networkMode = "slirp4netns"
+		} else {
+			networkMode = "bridge"
+		}
 	}
 
 	// WORKING DIR

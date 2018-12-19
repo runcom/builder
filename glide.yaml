@@ -89,7 +89,8 @@ import:
   version: d641721ec2dead6fe5ca284096fe4b1fcd49e427
 # builds
 - package: github.com/containers/buildah
-  version: master
+  version: vendor-everything
+  repo: https://github.com/vrothberg/buildah
 - package: github.com/containers/image
   version: master
 - package: github.com/containers/storage

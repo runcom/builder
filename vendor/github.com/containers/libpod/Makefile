@@ -1,6 +1,6 @@
 GO ?= go
 DESTDIR ?= /
-EPOCH_TEST_COMMIT ?= 1b52843cfd2ae254a6e52c74e564730f1c875c4c
+EPOCH_TEST_COMMIT ?= e1732a5213147e3c0b7bf60b55a332c3720ecb4b
 HEAD ?= HEAD
 CHANGELOG_BASE ?= HEAD~
 CHANGELOG_TARGET ?= HEAD
@@ -108,7 +108,7 @@ test/goecho/goecho: .gopathok $(wildcard test/goecho/*.go)
 	$(GO) build -ldflags '$(LDFLAGS)' -o $@ $(PROJECT)/test/goecho
 
 podman: .gopathok $(PODMAN_VARLINK_DEPENDENCIES)
-	$(GO) build -i -ldflags '$(LDFLAGS_PODMAN)' -tags "$(BUILDTAGS)" -o bin/$@ $(PROJECT)/cmd/podman
+	$(GO) build -ldflags '$(LDFLAGS_PODMAN)' -tags "$(BUILDTAGS)" -o bin/$@ $(PROJECT)/cmd/podman
 
 local-cross: $(CROSS_BUILD_TARGETS)
 
@@ -116,7 +116,7 @@ bin/podman.cross.%: .gopathok
 	TARGET="$*"; \
 	GOOS="$${TARGET%%.*}" \
 	GOARCH="$${TARGET##*.}" \
-	$(GO) build -i -ldflags '$(LDFLAGS_PODMAN)' -tags '$(BUILDTAGS_CROSS)' -o "$@" $(PROJECT)/cmd/podman
+	$(GO) build -ldflags '$(LDFLAGS_PODMAN)' -tags '$(BUILDTAGS_CROSS)' -o "$@" $(PROJECT)/cmd/podman
 
 python:
 ifdef HAS_PYTHON3
@@ -165,13 +165,14 @@ integration.centos:
 	DIST=CentOS sh .papr_prepare.sh
 
 shell: libpodimage
-	${CONTAINER_RUNTIME} run --tmpfs -e STORAGE_OPTIONS="--storage-driver=vfs" -e CGROUP_MANAGER=cgroupfs -e TESTFLAGS -e TRAVIS -it --privileged --rm -v ${CURDIR}:/go/src/${PROJECT} ${LIBPOD_IMAGE} sh
+	${CONTAINER_RUNTIME} run -e STORAGE_OPTIONS="--storage-driver=vfs" -e CGROUP_MANAGER=cgroupfs -e TESTFLAGS -e TRAVIS -it --privileged --rm -v ${CURDIR}:/go/src/${PROJECT} ${LIBPOD_IMAGE} sh
 
 testunit: libpodimage
 	${CONTAINER_RUNTIME} run -e STORAGE_OPTIONS="--storage-driver=vfs" -e TESTFLAGS -e CGROUP_MANAGER=cgroupfs -e TRAVIS -t --privileged --rm -v ${CURDIR}:/go/src/${PROJECT} ${LIBPOD_IMAGE} make localunit
 
 localunit: test/goecho/goecho varlink_generate
 	$(GO) test -tags "$(BUILDTAGS)" -cover $(PACKAGES)
+	$(MAKE) -C contrib/cirrus/packer test
 
 ginkgo:
 	ginkgo -v -tags "$(BUILDTAGS)" -cover -flakeAttempts 3 -progress -trace -noColor test/e2e/.

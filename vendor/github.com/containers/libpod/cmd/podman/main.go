@@ -2,13 +2,13 @@ package main
 
 import (
 	"fmt"
+	"log/syslog"
 	"os"
 	"os/exec"
 	"runtime/pprof"
 	"syscall"
 
 	"github.com/containers/libpod/libpod"
-	"github.com/containers/libpod/pkg/hooks"
 	_ "github.com/containers/libpod/pkg/hooks/0.1.0"
 	"github.com/containers/libpod/pkg/rootless"
 	"github.com/containers/libpod/version"
@@ -17,7 +17,6 @@ import (
 	"github.com/sirupsen/logrus"
 	lsyslog "github.com/sirupsen/logrus/hooks/syslog"
 	"github.com/urfave/cli"
-	"log/syslog"
 )
 
 // This is populated by the Makefile from the VERSION file
@@ -35,8 +34,10 @@ var cmdsNotRequiringRootless = map[string]bool{
 	// If this change, please also update libpod.refreshRootless()
 	"login":   true,
 	"logout":  true,
+	"mount":   true,
 	"kill":    true,
 	"pause":   true,
+	"restart": true,
 	"run":     true,
 	"unpause": true,
 	"search":  true,
@@ -103,6 +104,7 @@ func main() {
 		umountCommand,
 		unpauseCommand,
 		versionCommand,
+		volumeCommand,
 		waitCommand,
 	}
 
@@ -206,11 +208,9 @@ func main() {
 			Usage:  "path to default mounts file",
 			Hidden: true,
 		},
-		cli.StringFlag{
-			Name:   "hooks-dir-path",
-			Usage:  "set the OCI hooks directory path",
-			Value:  hooks.DefaultDir,
-			Hidden: true,
+		cli.StringSliceFlag{
+			Name:  "hooks-dir",
+			Usage: "set the OCI hooks directory path (may be set multiple times)",
 		},
 		cli.IntFlag{
 			Name:   "max-workers",

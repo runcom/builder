@@ -26,6 +26,7 @@ import (
 	"github.com/containers/libpod/pkg/rootless"
 	"github.com/containers/libpod/pkg/secrets"
 	"github.com/containers/storage/pkg/idtools"
+	"github.com/mrunalp/fileutils"
 	"github.com/opencontainers/runc/libcontainer/user"
 	spec "github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/opencontainers/runtime-tools/generate"
@@ -136,7 +137,14 @@ func (c *Container) prepare() (err error) {
 
 // cleanupNetwork unmounts and cleans up the container's network
 func (c *Container) cleanupNetwork() error {
-	if c.NetworkDisabled() {
+	if c.config.NetNsCtr != "" {
+		return nil
+	}
+	netDisabled, err := c.NetworkDisabled()
+	if err != nil {
+		return err
+	}
+	if netDisabled {
 		return nil
 	}
 	if c.state.NetNS == nil {
@@ -180,7 +188,6 @@ func (c *Container) generateSpec(ctx context.Context) (*spec.Spec, error) {
 	if err := c.makeBindMounts(); err != nil {
 		return nil, err
 	}
-
 	// Check if the spec file mounts contain the label Relabel flags z or Z.
 	// If they do, relabel the source directory and then remove the option.
 	for _, m := range g.Mounts() {
@@ -224,23 +231,18 @@ func (c *Container) generateSpec(ctx context.Context) (*spec.Spec, error) {
 		}
 	}
 
-	if !rootless.IsRootless() {
-		if c.state.ExtensionStageHooks, err = c.setupOCIHooks(ctx, g.Config); err != nil {
-			return nil, errors.Wrapf(err, "error setting up OCI Hooks")
-		}
+	if c.state.ExtensionStageHooks, err = c.setupOCIHooks(ctx, g.Config); err != nil {
+		return nil, errors.Wrapf(err, "error setting up OCI Hooks")
 	}
 
 	// Bind builtin image volumes
 	if c.config.Rootfs == "" && c.config.ImageVolumes {
-		if err := c.addLocalVolumes(ctx, &g); err != nil {
+		if err := c.addLocalVolumes(ctx, &g, execUser); err != nil {
 			return nil, errors.Wrapf(err, "error mounting image volumes")
 		}
 	}
 
 	if c.config.User != "" {
-		if !c.state.Mounted {
-			return nil, errors.Wrapf(ErrCtrStateInvalid, "container %s must be mounted in order to translate User field", c.ID())
-		}
 		// User and Group must go together
 		g.SetProcessUID(uint32(execUser.Uid))
 		g.SetProcessGID(uint32(execUser.Gid))
@@ -248,9 +250,6 @@ func (c *Container) generateSpec(ctx context.Context) (*spec.Spec, error) {
 
 	// Add addition groups if c.config.GroupAdd is not empty
 	if len(c.config.Groups) > 0 {
-		if !c.state.Mounted {
-			return nil, errors.Wrapf(ErrCtrStateInvalid, "container %s must be mounted in order to add additional groups", c.ID())
-		}
 		gids, _ := lookup.GetContainerGroups(c.config.Groups, c.state.Mountpoint, nil)
 		for _, gid := range gids {
 			g.AddProcessAdditionalGid(gid)
@@ -514,7 +513,7 @@ func (c *Container) checkpoint(ctx context.Context, options ContainerCheckpointO
 	return c.save()
 }
 
-func (c *Container) restore(ctx context.Context, keep bool) (err error) {
+func (c *Container) restore(ctx context.Context, options ContainerCheckpointOptions) (err error) {
 
 	if !criu.CheckForCriu() {
 		return errors.Errorf("restoring a container requires at least CRIU %d", criu.MinCriuVersion)
@@ -602,7 +601,7 @@ func (c *Container) restore(ctx context.Context, keep bool) (err error) {
 	// Cleanup for a working restore.
 	c.removeConmonFiles()
 
-	if err := c.runtime.ociRuntime.createContainer(c, c.config.CgroupParent, true); err != nil {
+	if err := c.runtime.ociRuntime.createContainer(c, c.config.CgroupParent, &options); err != nil {
 		return err
 	}
 
@@ -610,7 +609,7 @@ func (c *Container) restore(ctx context.Context, keep bool) (err error) {
 
 	c.state.State = ContainerStateRunning
 
-	if !keep {
+	if !options.Keep {
 		// Delete all checkpoint related files. At this point, in theory, all files
 		// should exist. Still ignoring errors for now as the container should be
 		// restored and running. Not erroring out just because some cleanup operation
@@ -641,30 +640,74 @@ func (c *Container) makeBindMounts() error {
 	if c.state.BindMounts == nil {
 		c.state.BindMounts = make(map[string]string)
 	}
+	netDisabled, err := c.NetworkDisabled()
+	if err != nil {
+		return err
+	}
 
-	if !c.NetworkDisabled() {
-		// Make /etc/resolv.conf
-		if _, ok := c.state.BindMounts["/etc/resolv.conf"]; ok {
-			// If it already exists, delete so we can recreate
+	if !netDisabled {
+		// If /etc/resolv.conf and /etc/hosts exist, delete them so we
+		// will recreate
+		if path, ok := c.state.BindMounts["/etc/resolv.conf"]; ok {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return errors.Wrapf(err, "error removing container %s resolv.conf", c.ID())
+			}
 			delete(c.state.BindMounts, "/etc/resolv.conf")
 		}
-		newResolv, err := c.generateResolvConf()
-		if err != nil {
-			return errors.Wrapf(err, "error creating resolv.conf for container %s", c.ID())
-		}
-		c.state.BindMounts["/etc/resolv.conf"] = newResolv
-
-		// Make /etc/hosts
-		if _, ok := c.state.BindMounts["/etc/hosts"]; ok {
-			// If it already exists, delete so we can recreate
+		if path, ok := c.state.BindMounts["/etc/hosts"]; ok {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return errors.Wrapf(err, "error removing container %s hosts", c.ID())
+			}
 			delete(c.state.BindMounts, "/etc/hosts")
 		}
-		newHosts, err := c.generateHosts()
-		if err != nil {
-			return errors.Wrapf(err, "error creating hosts file for container %s", c.ID())
-		}
-		c.state.BindMounts["/etc/hosts"] = newHosts
 
+		if c.config.NetNsCtr != "" {
+			// We share a net namespace
+			// We want /etc/resolv.conf and /etc/hosts from the
+			// other container
+			depCtr, err := c.runtime.state.Container(c.config.NetNsCtr)
+			if err != nil {
+				return errors.Wrapf(err, "error fetching dependency %s of container %s", c.config.NetNsCtr, c.ID())
+			}
+
+			// We need that container's bind mounts
+			bindMounts, err := depCtr.BindMounts()
+			if err != nil {
+				return errors.Wrapf(err, "error fetching bind mounts from dependency %s of container %s", depCtr.ID(), c.ID())
+			}
+
+			// The other container may not have a resolv.conf or /etc/hosts
+			// If it doesn't, don't copy them
+			resolvPath, exists := bindMounts["/etc/resolv.conf"]
+			if exists {
+				resolvDest := filepath.Join(c.state.RunDir, "resolv.conf")
+				if err := fileutils.CopyFile(resolvPath, resolvDest); err != nil {
+					return errors.Wrapf(err, "error copying resolv.conf from dependency container %s of container %s", depCtr.ID(), c.ID())
+				}
+				c.state.BindMounts["/etc/resolv.conf"] = resolvDest
+			}
+
+			hostsPath, exists := bindMounts["/etc/hosts"]
+			if exists {
+				hostsDest := filepath.Join(c.state.RunDir, "hosts")
+				if err := fileutils.CopyFile(hostsPath, hostsDest); err != nil {
+					return errors.Wrapf(err, "error copying hosts file from dependency container %s of container %s", depCtr.ID(), c.ID())
+				}
+				c.state.BindMounts["/etc/hosts"] = hostsDest
+			}
+		} else {
+			newResolv, err := c.generateResolvConf()
+			if err != nil {
+				return errors.Wrapf(err, "error creating resolv.conf for container %s", c.ID())
+			}
+			c.state.BindMounts["/etc/resolv.conf"] = newResolv
+
+			newHosts, err := c.generateHosts()
+			if err != nil {
+				return errors.Wrapf(err, "error creating hosts file for container %s", c.ID())
+			}
+			c.state.BindMounts["/etc/hosts"] = newHosts
+		}
 	}
 
 	// SHM is always added when we mount the container
@@ -729,9 +772,10 @@ func (c *Container) generateResolvConf() (string, error) {
 		return "", errors.Wrapf(err, "unable to read %s", resolvPath)
 	}
 
-	// Process the file to remove localhost nameservers
+	// Ensure that the container's /etc/resolv.conf is compatible with its
+	// network configuration.
 	// TODO: set ipv6 enable bool more sanely
-	resolv, err := resolvconf.FilterResolvDNS(contents, true)
+	resolv, err := resolvconf.FilterResolvDNS(contents, true, c.config.CreateNetNS)
 	if err != nil {
 		return "", errors.Wrapf(err, "error parsing host resolv.conf")
 	}
@@ -764,7 +808,7 @@ func (c *Container) generateResolvConf() (string, error) {
 
 	// Build resolv.conf
 	if _, err = resolvconf.Build(destPath, nameservers, search, options); err != nil {
-		return "", errors.Wrapf(err, "error building resolv.conf for container %s")
+		return "", errors.Wrapf(err, "error building resolv.conf for container %s", c.ID())
 	}
 
 	// Relabel resolv.conf for the container
@@ -801,7 +845,6 @@ func (c *Container) generateHosts() (string, error) {
 func (c *Container) generatePasswd() (string, error) {
 	var (
 		groupspec string
-		group     *user.Group
 		gid       int
 	)
 	if c.config.User == "" {
@@ -826,17 +869,16 @@ func (c *Container) generatePasswd() (string, error) {
 		return "", nil
 	}
 	if groupspec != "" {
-		if !c.state.Mounted {
-			return "", errors.Wrapf(ErrCtrStateInvalid, "container %s must be mounted in order to translate group field for passwd record", c.ID())
-		}
-		group, err = lookup.GetGroup(c.state.Mountpoint, groupspec)
-		if err != nil {
-			if err == user.ErrNoGroupEntries {
+		ugid, err := strconv.ParseUint(groupspec, 10, 32)
+		if err == nil {
+			gid = int(ugid)
+		} else {
+			group, err := lookup.GetGroup(c.state.Mountpoint, groupspec)
+			if err != nil {
 				return "", errors.Wrapf(err, "unable to get gid %s from group file", groupspec)
 			}
-			return "", err
+			gid = group.Gid
 		}
-		gid = group.Gid
 	}
 	originPasswdFile := filepath.Join(c.state.Mountpoint, "/etc/passwd")
 	orig, err := ioutil.ReadFile(originPasswdFile)

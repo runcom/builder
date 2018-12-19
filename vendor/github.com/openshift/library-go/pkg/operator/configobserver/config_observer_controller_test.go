@@ -73,13 +73,13 @@ func TestSyncStatus(t *testing.T) {
 				{"ObservedConfigChanged", "Writing updated observed config"},
 			},
 			observers: []ObserveConfigFunc{
-				func(listers Listers, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
+				func(listers Listers, recorder events.Recorder, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
 					return map[string]interface{}{"foo": "one"}, nil
 				},
-				func(listers Listers, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
+				func(listers Listers, recorder events.Recorder, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
 					return map[string]interface{}{"bar": "two"}, nil
 				},
-				func(listers Listers, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
+				func(listers Listers, recorder events.Recorder, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
 					return map[string]interface{}{"baz": "three"}, nil
 				},
 			},
@@ -106,13 +106,13 @@ func TestSyncStatus(t *testing.T) {
 				{"ObservedConfigChanged", "Writing updated observed config"},
 			},
 			observers: []ObserveConfigFunc{
-				func(listers Listers, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
+				func(listers Listers, recorder events.Recorder, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
 					return map[string]interface{}{"foo": "one"}, nil
 				},
-				func(listers Listers, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
+				func(listers Listers, recorder events.Recorder, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
 					return map[string]interface{}{"bar": "two"}, nil
 				},
-				func(listers Listers, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
+				func(listers Listers, recorder events.Recorder, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
 					errs = append(errs, fmt.Errorf("some failure"))
 					return observedConfig, errs
 				},
@@ -126,7 +126,7 @@ func TestSyncStatus(t *testing.T) {
 			expectedCondition: &operatorv1.OperatorCondition{
 				Type:    operatorStatusTypeConfigObservationFailing,
 				Status:  operatorv1.ConditionTrue,
-				Reason:  configObservationErrorConditionReason,
+				Reason:  "Error",
 				Message: "some failure",
 			},
 		},
@@ -142,7 +142,7 @@ func TestSyncStatus(t *testing.T) {
 				{"ObservedConfigWriteError", "Failed to write observed config: update spec failure"},
 			},
 			observers: []ObserveConfigFunc{
-				func(listers Listers, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
+				func(listers Listers, recorder events.Recorder, existingConfig map[string]interface{}) (observedConfig map[string]interface{}, errs []error) {
 					return map[string]interface{}{"foo": "one"}, nil
 				},
 			},
@@ -152,7 +152,7 @@ func TestSyncStatus(t *testing.T) {
 			expectedCondition: &operatorv1.OperatorCondition{
 				Type:    operatorStatusTypeConfigObservationFailing,
 				Status:  operatorv1.ConditionTrue,
-				Reason:  configObservationErrorConditionReason,
+				Reason:  "Error",
 				Message: "error writing updated observed config: update spec failure",
 			},
 		},
@@ -164,10 +164,10 @@ func TestSyncStatus(t *testing.T) {
 			eventClient := fake.NewSimpleClientset()
 
 			configObserver := ConfigObserver{
-				listers:        &fakeLister{},
-				operatorClient: operatorConfigClient,
-				observers:      tc.observers,
-				eventRecorder:  events.NewRecorder(eventClient.CoreV1().Events("test"), "test-operator", &corev1.ObjectReference{}),
+				listers:              &fakeLister{},
+				operatorConfigClient: operatorConfigClient,
+				observers:            tc.observers,
+				eventRecorder:        events.NewRecorder(eventClient.CoreV1().Events("test"), "test-operator", &corev1.ObjectReference{}),
 			}
 			err := configObserver.sync()
 			if tc.expectError && err == nil {

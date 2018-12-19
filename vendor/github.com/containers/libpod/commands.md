@@ -16,6 +16,7 @@
 | [podman-diff(1)](/docs/podman-diff.1.md)                 | Inspect changes on a container or image's filesystem                      |[![...](/docs/play.png)](https://asciinema.org/a/FXfWB9CKYFwYM4EfqW3NSZy1G)|
 | [podman-exec(1)](/docs/podman-exec.1.md)                 | Execute a command in a running container
 | [podman-export(1)](/docs/podman-export.1.md)             | Export container's filesystem contents as a tar archive                   |[![...](/docs/play.png)](https://asciinema.org/a/913lBIRAg5hK8asyIhhkQVLtV)|
+| [podman-generate(1)](/docs/podman-generate.1.md)         | Generate structured output based on Podman containers and pods | |
 | [podman-history(1)](/docs/podman-history.1.md)           | Shows the history of an image                                             |[![...](/docs/play.png)](https://asciinema.org/a/bCvUQJ6DkxInMELZdc5DinNSx)|
 | [podman-image(1)](/docs/podman-image.1.md)             | Manage Images||
 | [podman-images(1)](/docs/podman-images.1.md)             | List images in local storage                                              |[![...](/docs/play.png)](https://asciinema.org/a/133649)|
@@ -62,4 +63,9 @@
 | [podman-unpause(1)](/docs/podman-unpause.1.md)           | Unpause one or more running containers                                    |[![...](/docs/play.png)](https://asciinema.org/a/141292)|
 | [podman-varlink(1)](/docs/podman-varlink.1.md)           | Run the varlink backend                                           ||
 | [podman-version(1)](/docs/podman-version.1.md)           | Display the version information                                           |[![...](/docs/play.png)](https://asciinema.org/a/mfrn61pjZT9Fc8L4NbfdSqfgu)|
+| [podman-volume-create(1)](/docs/podman-volume-create.1.md) | Create a volume ||
+| [podman-volume-inspect(1)](/docs/podman-volume-inspect.1.md) | Get detailed information on one or more volumes ||
+| [podman-volume-ls(1)](/docs/podman-volume-ls.1.md)       | List all the available volumes ||
+| [podman-volume-rm(1)](/docs/podman-volume-rm.1.md)       | Remove one or more volumes ||
+| [podman-volume-prune(1)](/docs/podman-volume-prune.1.md) | Remove all unused volumes ||
 | [podman-wait(1)](/docs/podman-wait.1.md)                 | Wait on one or more containers to stop and print their exit codes  |[![...](/docs/play.png)](https://asciinema.org/a/QNPGKdjWuPgI96GcfkycQtah0)|

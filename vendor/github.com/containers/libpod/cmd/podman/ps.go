@@ -184,7 +184,7 @@ var (
 			Usage: "Display the extended information",
 		},
 		cli.BoolFlag{
-			Name:  "pod",
+			Name:  "pod, p",
 			Usage: "Print the ID and name of the pod the containers are associated with",
 		},
 		cli.BoolFlag{
@@ -199,6 +199,10 @@ var (
 			Name:  "sort",
 			Usage: "Sort output by command, created, id, image, names, runningfor, size, or status",
 			Value: "created",
+		},
+		cli.BoolFlag{
+			Name:  "sync",
+			Usage: "Sync container state with OCI runtime",
 		},
 	}
 	psDescription = "Prints out information about the containers"
@@ -260,6 +264,7 @@ func psCmd(c *cli.Context) error {
 		Size:      c.Bool("size"),
 		Namespace: c.Bool("namespace"),
 		Sort:      c.String("sort"),
+		Sync:      c.Bool("sync"),
 	}
 
 	filters := c.StringSlice("filter")

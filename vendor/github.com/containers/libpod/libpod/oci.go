@@ -227,7 +227,7 @@ func bindPorts(ports []ocicni.PortMapping) ([]*os.File, error) {
 	return files, nil
 }
 
-func (r *OCIRuntime) createOCIContainer(ctr *Container, cgroupParent string, restoreContainer bool) (err error) {
+func (r *OCIRuntime) createOCIContainer(ctr *Container, cgroupParent string, restoreOptions *ContainerCheckpointOptions) (err error) {
 	var stderrBuf bytes.Buffer
 
 	runtimeDir, err := util.GetRootlessRuntimeDir()
@@ -289,8 +289,11 @@ func (r *OCIRuntime) createOCIContainer(ctr *Container, cgroupParent string, res
 		args = append(args, "--syslog")
 	}
 
-	if restoreContainer {
+	if restoreOptions != nil {
 		args = append(args, "--restore", ctr.CheckpointPath())
+		if restoreOptions.TCPEstablished {
+			args = append(args, "--restore-arg", "--tcp-established")
+		}
 	}
 
 	logrus.WithFields(logrus.Fields{
@@ -316,6 +319,10 @@ func (r *OCIRuntime) createOCIContainer(ctr *Container, cgroupParent string, res
 	cmd.Env = append(r.conmonEnv, fmt.Sprintf("_OCI_SYNCPIPE=%d", 3))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("_OCI_STARTPIPE=%d", 4))
 	cmd.Env = append(cmd.Env, fmt.Sprintf("XDG_RUNTIME_DIR=%s", runtimeDir))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("_LIBPOD_USERNS_CONFIGURED=%s", os.Getenv("_LIBPOD_USERNS_CONFIGURED")))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("_LIBPOD_ROOTLESS_UID=%s", os.Getenv("_LIBPOD_ROOTLESS_UID")))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("HOME=%s", os.Getenv("HOME")))
+	cmd.Env = append(cmd.Env, fmt.Sprintf("XDG_RUNTIME_DIR=%s", runtimeDir))
 
 	if r.reservePorts {
 		ports, err := bindPorts(ctr.config.PortMappings)
@@ -329,7 +336,7 @@ func (r *OCIRuntime) createOCIContainer(ctr *Container, cgroupParent string, res
 		cmd.ExtraFiles = append(cmd.ExtraFiles, ports...)
 	}
 
-	if rootless.IsRootless() {
+	if ctr.config.NetMode.IsSlirp4netns() {
 		ctr.rootlessSlirpSyncR, ctr.rootlessSlirpSyncW, err = os.Pipe()
 		if err != nil {
 			return errors.Wrapf(err, "failed to create rootless network sync pipe")
@@ -584,6 +591,9 @@ func (r *OCIRuntime) startContainer(ctr *Container) error {
 		return err
 	}
 	env := []string{fmt.Sprintf("XDG_RUNTIME_DIR=%s", runtimeDir)}
+	if notify, ok := os.LookupEnv("NOTIFY_SOCKET"); ok {
+		env = append(env, fmt.Sprintf("NOTIFY_SOCKET=%s", notify))
+	}
 	if err := utils.ExecCmdWithStdStreams(os.Stdin, os.Stdout, os.Stderr, env, r.path, "start", ctr.ID()); err != nil {
 		return err
 	}
@@ -686,8 +696,12 @@ func (r *OCIRuntime) stopContainer(ctr *Container, timeout uint) error {
 
 // deleteContainer deletes a container from the OCI runtime
 func (r *OCIRuntime) deleteContainer(ctr *Container) error {
-	_, err := utils.ExecCmd(r.path, "delete", "--force", ctr.ID())
-	return err
+	runtimeDir, err := util.GetRootlessRuntimeDir()
+	if err != nil {
+		return err
+	}
+	env := []string{fmt.Sprintf("XDG_RUNTIME_DIR=%s", runtimeDir)}
+	return utils.ExecCmdWithStdStreams(os.Stdin, os.Stdout, os.Stderr, env, r.path, "delete", "--force", ctr.ID())
 }
 
 // pauseContainer pauses the given container
@@ -847,6 +861,7 @@ func (r *OCIRuntime) execStopContainer(ctr *Container, timeout uint) error {
 
 // checkpointContainer checkpoints the given container
 func (r *OCIRuntime) checkpointContainer(ctr *Container, options ContainerCheckpointOptions) error {
+	label.SetSocketLabel(ctr.ProcessLabel())
 	// imagePath is used by CRIU to store the actual checkpoint files
 	imagePath := ctr.CheckpointPath()
 	// workPath will be used to store dump.log and stats-dump
@@ -861,6 +876,9 @@ func (r *OCIRuntime) checkpointContainer(ctr *Container, options ContainerCheckp
 	args = append(args, workPath)
 	if options.KeepRunning {
 		args = append(args, "--leave-running")
+	}
+	if options.TCPEstablished {
+		args = append(args, "--tcp-established")
 	}
 	args = append(args, ctr.ID())
 	return utils.ExecCmdWithStdStreams(os.Stdin, os.Stdout, os.Stderr, nil, r.path, args...)
